@@ -204,6 +204,27 @@ def board_pos_after_move(current_board, previous_board, move_idx, stone_value):
     return {"move_legal": True, "board_outcome": proposed_board}
 
 
+def get_all_legal_moves_from_board_state(board_state):
+    """
+    :param board_state: a 13x13x17 board state
+    :return: a 13x13 binary matrix indicating legal moves (1 = legal, 0 = illegal).
+    """
+    # The first step is probably to identify all strings at the current board state. Only need to consider each position once if we keep table.
+    black_board = board_state[14] if board_state[16][0] == 1 else board_state[15]
+    white_board = board_state[14] if board_state[16][0] == 0 else board_state[15]
+    current_board = get_single_storable_board_from_state(black_board, white_board)
+    string_board = [-1]*169  # If a string is here, it will store the id of this string.
+    liberties_board = [(-1, -1, -1, -1)]*169  # This board marks liberties. The tuple tracks the string id to the (top, bottom, left, right).
+    string_liberty_counts = {}  # Key: string id, value: liberty count.
+
+
+    # The second step would then be to consider each of the 169 intersection
+
+
+
+
+
+
 def update_board_state_for_move(action_idx, board_state):
     """
     Does an inplace update of the board state.

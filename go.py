@@ -214,11 +214,17 @@ def get_all_legal_moves_from_board_state(board_state):
     white_board = board_state[14] if board_state[16][0] == 0 else board_state[15]
     current_board = get_single_storable_board_from_state(black_board, white_board)
     string_board = [-1]*169  # If a string is here, it will store the id of this string.
+    string_count = 0
     liberties_board = [(-1, -1, -1, -1)]*169  # This board marks liberties. The tuple tracks the string id to the (top, bottom, left, right).
     string_liberty_counts = {}  # Key: string id, value: liberty count.
 
 
-    # The second step would then be to consider each of the 169 intersection
+    # The second step would then be to consider each of the 169 intersection.
+    for idx in range(169):
+        if current_board[idx] is not 0:
+            stone_value = current_board[idx]
+
+
 
 
 

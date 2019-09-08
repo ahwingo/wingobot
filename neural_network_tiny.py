@@ -15,16 +15,16 @@ class PolicyValueNetwork:
 
     def __init__(self, l2_const, starting_network_file=None):
 
-        self.l2_const =l2_const
+        self.l2_const = l2_const
 
         # If a model is already provided, load it from the file.
         if starting_network_file:
             self.model = keras.models.load_model(starting_network_file)
             return
 
-        inputs = Input(shape=(13, 13, 17))
+        inputs = Input(shape=(13, 13, 9))
 
-        conv_block = Conv2D(filters=256,
+        conv_block = Conv2D(filters=128,
                             kernel_size=(3, 3),
                             strides=1,
                             padding="same",
@@ -63,7 +63,7 @@ class PolicyValueNetwork:
         value = BatchNormalization()(value)
         value = Activation("relu")(value)
         value = Reshape((13*13,))(value)
-        value = Dense(256, activation="relu")(value)
+        value = Dense(128, activation="relu")(value)
         value = Dense(1, activation="tanh", name="value")(value)
 
         self.model = Model(inputs=inputs, outputs=[value, policy])
@@ -74,14 +74,14 @@ class PolicyValueNetwork:
         self.model._make_predict_function()
 
         # Save the model so we can load it in a different thread!!
-        self.save_model_to_file("young_saigon.h5")
+        self.save_model_to_file("young_saigon_tiny.h5")
 
     def load_latest_model():
-        self.model = keras.models.load_model("young_saigon.h5")
+        self.model = keras.models.load_model("young_saigon_tiny.h5")
 
     def create_res_block(self, input_layer):
         res_conn = input_layer
-        res_block = Conv2D(filters=256,
+        res_block = Conv2D(filters=128,
                            kernel_size=(3, 3),
                            strides=1,
                            padding="same",
@@ -91,7 +91,7 @@ class PolicyValueNetwork:
                            bias_regularizer=regularizers.l2(self.l2_const))(input_layer)
         res_block = BatchNormalization()(res_block)
         res_block = Activation("relu")(res_block)
-        res_block = Conv2D(filters=256,
+        res_block = Conv2D(filters=128,
                            kernel_size=(3, 3),
                            strides=1,
                            padding="same",
@@ -122,7 +122,7 @@ class PolicyValueNetwork:
         :param training_data: a numpy array of
         """
         # Load a copy of the model for training.
-        training_model = keras.models.load_model("young_saigon.h5")
+        training_model = keras.models.load_model("young_saigon_tiny.h5")
         #training_model = self.model
         training_model.fit(x=training_data_input,
                           y={"value": training_data_gt_value, "policy": training_data_gt_policy},
@@ -130,7 +130,7 @@ class PolicyValueNetwork:
 
         # TODO: Watch out for race conditions!!! Obtain a lock to update self.model.
         # Save the newly trained version of this model to the young_saigon.h5 file.
-        training_model.save("young_saigon.h5")
+        training_model.save("young_saigon_tiny.h5")
         print("Done training!")
 
 

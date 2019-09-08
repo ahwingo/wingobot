@@ -8,9 +8,9 @@ Parts:
     -   Evaluation: Every X games, compare the current network to the previous best (to ensure the network is learning).
 """
 
-import mcts
-from go import *
-from neural_network import *
+import mcts_tiny
+from go_tiny import *
+from neural_network_tiny import *
 import h5py
 import numpy as np
 import threading
@@ -51,7 +51,7 @@ def self_play(player, game_number, output_file):
 
     # Initialize the state of the empty board from blacks perspective.
     board_state = []
-    for _ in range(16):
+    for _ in range(8):
         board_state.append([0]*169)
     board_state.append([1]*169)
 
@@ -67,12 +67,12 @@ def self_play(player, game_number, output_file):
         temperature = 1.0 if total_moves < 60 else 0.2
 
         # Black moves.
-        black_mcst = mcts.MonteCarloSearchTree(player, board_state, temperature, root=black_root_node)
+        black_mcst = mcts_tiny.MonteCarloSearchTree(player, board_state, temperature, root=black_root_node)
         action_idx, black_root_node = black_mcst.search(169)
         total_moves += 1
 
         # Store the state and action.
-        current_board_and_chosen_action = get_single_storable_board_from_state(board_state[14], board_state[15])
+        current_board_and_chosen_action = get_single_storable_board_from_state(board_state[6], board_state[7])
         current_board_and_chosen_action.append(1)
         current_board_and_chosen_action.append(action_idx)
         move_history.append(current_board_and_chosen_action)
@@ -89,15 +89,15 @@ def self_play(player, game_number, output_file):
         board_state = update_board_state_for_move(action_idx, board_state)
 
         # Display the board.
-        #print_board(board_state[15], board_state[14])
+        #print_board(board_state[7], board_state[6])
 
         # White moves.
-        white_mcst = mcts.MonteCarloSearchTree(player, board_state, temperature, white_root_node)
+        white_mcst = mcts_tiny.MonteCarloSearchTree(player, board_state, temperature, white_root_node)
         action_idx, white_root_node = white_mcst.search(169)
         total_moves += 1
 
         # Store the state and action.
-        current_board_and_chosen_action = get_single_storable_board_from_state(board_state[15], board_state[14])
+        current_board_and_chosen_action = get_single_storable_board_from_state(board_state[7], board_state[6])
         current_board_and_chosen_action.append(1)
         current_board_and_chosen_action.append(action_idx)
         move_history.append(current_board_and_chosen_action)
@@ -118,13 +118,13 @@ def self_play(player, game_number, output_file):
 
     # Display the board.
     print("Final board state.")
-    print_board(board_state[14], board_state[15])
+    print_board(board_state[6], board_state[7])
 
     # At this point, the game is over. Calculate the score and update the networks.
-    if board_state[16][0] == 1:
-        board = get_single_scorable_board_from_state(board_state[14], board_state[15])
+    if board_state[8][0] == 1:
+        board = get_single_scorable_board_from_state(board_state[6], board_state[7])
     else:
-        board = get_single_scorable_board_from_state(board_state[15], board_state[14])
+        board = get_single_scorable_board_from_state(board_state[7], board_state[6])
     game_outcome = 1 if tromp_taylor_score(board) > 7.5 else -1
 
     # Convert the values to numpy arrays.
@@ -171,10 +171,10 @@ def get_input_ground_truth_pairs(game_history_file, game_number, move_number):
     # Get the board state, for the last 8 moves.
     last_eight_moves = []
     # First, get the last 8 boards.
-    if move_number >= 8:
-        last_eight_moves = game_history_file[game_key]["move_history"][move_number-8:move_number, 0:169]
+    if move_number >= 4:
+        last_eight_moves = game_history_file[game_key]["move_history"][move_number-4:move_number, 0:169]
     else:
-        for _ in range(abs(move_number - 8)):
+        for _ in range(abs(move_number - 4)):
             last_eight_moves.append([0]*169)
         last_eight_moves.extend(game_history_file[game_key]["move_history"][0:move_number, 0:169])
 
@@ -231,7 +231,7 @@ def optimization(game_history_file, player_nn, mini_batch_num):
         training_data["y_true_values"].append(output_value)
         training_data["y_true_policies"].append(output_policy)
 
-    reshaped_inputs = np.reshape(np.array(training_data["inputs"]), (2048, 13, 13, 17))
+    reshaped_inputs = np.reshape(np.array(training_data["inputs"]), (2048, 13, 13, 9))
     reshaped_gt_values = np.reshape(np.array(training_data["y_true_values"]), (2048, 1))
     #reshaped_gt_values = np.array(training_data["y_true_values"])
     reshaped_gt_policies = np.reshape(np.array(training_data["y_true_policies"]), (2048, 170))
@@ -294,7 +294,7 @@ def main(game_history_filename, starting_network_file=None, best_network_file=No
 
     game_history_file.close()
 
-main("game_history_sep_7.h5")
+main("game_history_sep_8_tiny.h5")
 
 
 

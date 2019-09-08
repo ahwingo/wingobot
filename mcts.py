@@ -82,7 +82,9 @@ class MCTSNode:
         legal_actions.append(1)  # The last move is a pass and that is always legal!!!
         return legal_actions
         """
-        return get_all_legal_moves_from_board_state(self.state)
+        legal_moves = get_all_legal_moves_from_board_state(self.state)
+        legal_moves.append(1)
+        return legal_moves
 
     def apply_dirichlet_noise(self, prior_probs):
         dirichlet_probs = np.random.dirichlet([0.03]*170)

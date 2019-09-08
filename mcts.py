@@ -74,12 +74,15 @@ class MCTSNode:
         return predicted_value
 
     def get_legal_actions(self):
+        """
         legal_actions = [0]*169
         for idx in range(169):
             if board_pos_after_move(self.current_board.copy(), self.previous_board.copy(), idx, 1)["move_legal"]:
                 legal_actions[idx] = 1
         legal_actions.append(1)  # The last move is a pass and that is always legal!!!
         return legal_actions
+        """
+        return get_all_legal_moves_from_board_state(self.state)
 
     def apply_dirichlet_noise(self, prior_probs):
         dirichlet_probs = np.random.dirichlet([0.03]*170)

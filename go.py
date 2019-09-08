@@ -209,26 +209,98 @@ def get_all_legal_moves_from_board_state(board_state):
     :param board_state: a 13x13x17 board state
     :return: a 13x13 binary matrix indicating legal moves (1 = legal, 0 = illegal).
     """
-    # The first step is probably to identify all strings at the current board state. Only need to consider each position once if we keep table.
+
+    # Use this to indicate which moves are legal.
+    legal_moves = [0]*169
+
+    # The first step is probably to identify all strings at the current board state.
     black_board = board_state[14] if board_state[16][0] == 1 else board_state[15]
     white_board = board_state[14] if board_state[16][0] == 0 else board_state[15]
     current_board = get_single_storable_board_from_state(black_board, white_board)
     string_board = [-1]*169  # If a string is here, it will store the id of this string.
     string_count = 0
-    liberties_board = [(-1, -1, -1, -1)]*169  # This board marks liberties. The tuple tracks the string id to the (top, bottom, left, right).
+    liberties_board = [[]]*169
     string_liberty_counts = {}  # Key: string id, value: liberty count.
 
-
-    # The second step would then be to consider each of the 169 intersection.
     for idx in range(169):
+        # If this stone has already been considered, continue.
+        if string_board[idx] != -1:
+            continue
+        # If a stone is here, it is a string.
         if current_board[idx] is not 0:
             stone_value = current_board[idx]
+            string_board[idx] = string_count
+            string_liberty_counts[string_count] = 0
+            current_string = [idx]
+            for stone_idx in current_string:
+                adjacent_stones = get_adjacent_intersections(stone_idx, current_board)
+                for adjacent_stone in adjacent_stones:
+                    adj_stone_idx = adjacent_stone[0]
+                    adj_stone_value = adjacent_stone[1]
+                    # If the adjacent stone value matches the strings value,
+                    # and the stone has not been considered yet, add it to the string.
+                    if adj_stone_value == stone_value and string_board[adj_stone_idx] == -1:
+                        current_string.append(adj_stone_idx)
+                        string_board[adj_stone_idx] = string_count
+                    # Otherwise, if the adjacent stones value is 0, it is a liberty.
+                    if adj_stone_value == 0 and string_count not in liberties_board[adj_stone_idx]:
+                        string_liberty_counts[string_count] += 1
+                        liberties_board.append(string_count)
 
+            # Now that we are done with this string, increment the string count.
+            string_count += 1
 
+    # Now go back through all the intersections to find legal moves.
+    playing_stone_value = 1 if board_state[16][0] == 1 else 2
+    for idx in range(169):
+        value_at_idx = current_board[idx]
+        # If the intersection already has a stone there, the move is illegal.
+        if value_at_idx is not 0:
+            continue
+        # Get the adjacent indices.
+        adjacent_stones = get_adjacent_intersections(idx, current_board)
+        move_ends_in_liberties = False
+        capture_count = 0
+        for adjacent_stone in adjacent_stones:
+            adj_stone_idx = adjacent_stone[0]
+            adj_stone_value = adjacent_stone[1]
+            # If an adjacent intersection is a liberty, this is a legal move.
+            if adj_stone_value == 0:
+                move_ends_in_liberties = True
+                break
+            # If an adjacent stone is a friendly string with more than one liberty, this is a legal move.
+            elif adj_stone_value == playing_stone_value:
+                string_id = string_board[adj_stone_idx]
+                friendly_string_lib_count = string_liberty_counts[string_id]
+                if friendly_string_lib_count > 1:
+                    move_ends_in_liberties = True
+                    break
+            # If an adjaent stone is a friendly string with only one liberty, the move is legal bc it ends in capture.
+            # adj_stone_value is an element of {0, 1, 2, -2}, where -2 stands for out of bounds.
+            elif adj_stone_value != -2:
+                # If we get here then the adjacent stone belongs to the enemy!
+                string_id = string_board[adj_stone_idx]
+                enemy_string_lib_count = string_liberty_counts[string_id]
+                if enemy_string_lib_count <= 1:
+                    # Playing here ends in the capture of the enemy string. However, this may break the Ko rule.
+                    # First, check if a stone of the playing player was at this spot previously.
+                    if board_state[12][idx] == 0:
+                        # If a stone of this color was not previously here, the move is obviously legal.
+                        move_ends_in_liberties = True
+                        break
+                    else:
+                        # Otherwise, increment the capture count. If other stones are captured, Ko is not broken.
+                        capture_count += 1
+            # If the capture count is greater than or equal to two, then the Ko rule could not possibly be broken.
+            if capture_count >= 2:
+                move_ends_in_liberties = True
+                break
 
+        # If playing here results in liberties, the move is legal.
+        if move_ends_in_liberties:
+            legal_moves[idx] = 1
 
-
-
+    return legal_moves
 
 
 def update_board_state_for_move(action_idx, board_state):

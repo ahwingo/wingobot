@@ -1,0 +1,13 @@
+(;GM[1]FF[4]CA[UTF-8]
+RU[Chinese]SZ[13]KM[7.5]TM[600]
+PW[Gnugo-3.7.10-a1]PB[amybot-beginner-v1]WR[1800]BR[1199]DT[2019-02-19]PC[(CGOS) 13x13 Computer Go Server]RE[W+Resign]GN[107172]
+;B[jk]BL[599];W[cc]WL[597];B[dj]BL[599];W[kc]WL[594];B[cf]BL[599];W[fk]WL[591];B[fi]BL[598];W[gj]WL[588]
+;B[gh]BL[598];W[dl]WL[584];B[cl]BL[598];W[ck]WL[578];B[bk]BL[597];W[cj]WL[571];B[bj]BL[597];W[dk]WL[567]
+;B[ci]BL[596];W[fc]WL[563];B[hk]BL[596];W[bl]WL[559];B[cm]BL[596];W[al]WL[555];B[di]BL[595];W[kf]WL[551]
+;B[lg]BL[595];W[if]WL[548];B[ih]BL[595];W[fe]WL[545];B[hg]BL[594];W[lf]WL[541];B[gl]BL[594];W[kg]WL[537]
+;B[lh]BL[594];W[ji]WL[533];B[ki]BL[593];W[jh]WL[529];B[jj]BL[593];W[ii]WL[525];B[ij]BL[592];W[hi]WL[521]
+;B[hf]BL[592];W[ie]WL[517];B[he]BL[592];W[id]WL[513];B[hd]BL[591];W[hc]WL[510];B[ig]BL[591];W[be]WL[505]
+;B[ff]BL[590];W[bf]WL[501];B[bh]BL[590];W[cg]WL[498];B[dg]BL[590];W[df]WL[493];B[ef]BL[589];W[mg]WL[488]
+;B[de]BL[589];W[mh]WL[484];B[kh]BL[588];W[kj]WL[481];B[lj]BL[588];W[kk]WL[477];B[lk]BL[588];W[kl]WL[474]
+)
+

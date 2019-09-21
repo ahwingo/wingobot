@@ -1,0 +1,16 @@
+(;GM[1]FF[4]CA[UTF-8]
+RU[Chinese]SZ[13]KM[7.5]TM[600]
+PW[Weights_26_400]PB[Aya797d_ro_10k]WR[2738]BR[2667]DT[2018-01-08]PC[(CGOS) 13x13 Computer Go Server]RE[W+Resign]GN[47425]
+;B[kj]BL[600];W[jj]WL[598];B[ji]BL[598];W[kk]WL[596];B[li]BL[595];W[ij]WL[595];B[ii]BL[593];W[hj]WL[593]
+;B[lk]BL[591];W[jc]WL[592];B[fj]BL[589];W[dj]WL[589];B[kl]BL[587];W[dd]WL[588];B[di]BL[585];W[ci]WL[586]
+;B[dh]BL[583];W[ej]WL[584];B[fi]BL[582];W[fk]WL[583];B[gk]BL[580];W[fl]WL[581];B[gj]BL[578];W[gl]WL[579]
+;B[hk]BL[576];W[ke]WL[578];B[ch]BL[573];W[bi]WL[576];B[fd]BL[571];W[hd]WL[575];B[bh]BL[570];W[fe]WL[573]
+;B[ge]BL[568];W[gd]WL[572];B[ee]BL[565];W[fc]WL[570];B[ed]BL[564];W[ec]WL[569];B[dc]BL[562];W[cc]WL[567]
+;B[db]BL[560];W[de]WL[566];B[ef]BL[559];W[cb]WL[564];B[ck]BL[558];W[cj]WL[563];B[bk]BL[556];W[dl]WL[561]
+;B[dk]BL[555];W[ek]WL[560];B[cl]BL[554];W[em]WL[558];B[hl]BL[552];W[gm]WL[556];B[kc]BL[550];W[kd]WL[555]
+;B[jb]BL[548];W[kb]WL[553];B[ic]BL[545];W[lc]WL[552];B[gc]BL[543];W[eb]WL[550];B[id]BL[542];W[he]WL[549]
+;B[ie]BL[540];W[hc]WL[547];B[gb]BL[538];W[hb]WL[546];B[ib]BL[536];W[ga]WL[544];B[jf]BL[534];W[hf]WL[543]
+;B[kf]BL[532];W[lf]WL[540];B[lg]BL[529];W[mf]WL[539];B[be]BL[528];W[df]WL[537];B[gg]BL[525];W[gf]WL[536]
+;B[eg]BL[523];W[hg]WL[534];B[hh]BL[521];W[gh]WL[532];B[fg]BL[520];W[ih]WL[531];B[hi]BL[518];W[ig]WL[528]
+;B[mg]BL[516];W[le]WL[527])
+

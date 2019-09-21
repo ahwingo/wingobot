@@ -116,22 +116,35 @@ class PolicyValueNetwork:
     def save_model_to_file(self, model_filename):
         self.model.save(model_filename)
 
-    def train(self, training_data_input, training_data_gt_value, training_data_gt_policy):
+    def train(self, training_data_input, training_data_gt_value, training_data_gt_policy, save_file):
         """
         This function creates a copy of the model, trains it, and then replaces the model when training is done.
         :param training_data: a numpy array of
         """
         # Load a copy of the model for training.
-        training_model = keras.models.load_model("young_saigon.h5")
-        #training_model = self.model
+        training_model = keras.models.load_model(save_file)
         training_model.fit(x=training_data_input,
-                          y={"value": training_data_gt_value, "policy": training_data_gt_policy},
-                          batch_size=32)
+                           y={"value": training_data_gt_value, "policy": training_data_gt_policy},
+                           batch_size=32)
 
         # TODO: Watch out for race conditions!!! Obtain a lock to update self.model.
         # Save the newly trained version of this model to the young_saigon.h5 file.
-        training_model.save("young_saigon.h5")
+        training_model.save(save_file)
         print("Done training!")
 
+    def train_supervised(self, training_data_input, training_data_gt_value, training_data_gt_policy, save_file):
+        """
+        This function creates a copy of the model, trains it, and then replaces the model when training is done.
+        :param training_data: a numpy array of
+        """
+        # Load a copy of the model for training.
+        self.model.fit(x=training_data_input,
+                       y={"value": training_data_gt_value, "policy": training_data_gt_policy},
+                       batch_size=32)
+
+        # TODO: Watch out for race conditions!!! Obtain a lock to update self.model.
+        # Save the newly trained version of this model to the young_saigon.h5 file.
+        self.model.save(save_file)
+        print("Done training!")
 
 

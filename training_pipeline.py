@@ -73,7 +73,7 @@ def self_play(player, game_number, output_file):
 
         # Store the state and action.
         current_board_and_chosen_action = get_single_storable_board_from_state(board_state[14], board_state[15])
-        current_board_and_chosen_action.append(1)
+        current_board_and_chosen_action.append(1) # Moving player is black.
         current_board_and_chosen_action.append(action_idx)
         move_history.append(current_board_and_chosen_action)
 
@@ -98,7 +98,7 @@ def self_play(player, game_number, output_file):
 
         # Store the state and action.
         current_board_and_chosen_action = get_single_storable_board_from_state(board_state[15], board_state[14])
-        current_board_and_chosen_action.append(1)
+        current_board_and_chosen_action.append(2) # Moving player is white.
         current_board_and_chosen_action.append(action_idx)
         move_history.append(current_board_and_chosen_action)
 
@@ -129,7 +129,6 @@ def self_play(player, game_number, output_file):
 
     # Convert the values to numpy arrays.
     move_history = np.array(move_history, dtype='b')
-
     game_outcome = np.array(game_outcome, dtype='b')
 
     # Store the outcome of the game.

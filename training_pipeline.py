@@ -89,7 +89,7 @@ def self_play(player, game_number, output_file):
         board_state = update_board_state_for_move(action_idx, board_state)
 
         # Display the board.
-        #print_board(board_state[15], board_state[14])
+        print_board(board_state[15], board_state[14])
 
         # White moves.
         white_mcst = mcts.MonteCarloSearchTree(player, board_state, temperature, white_root_node)
@@ -114,7 +114,7 @@ def self_play(player, game_number, output_file):
         board_state = update_board_state_for_move(action_idx, board_state)
 
         # Display the board.
-        #print_board(board_state[14], board_state[15])
+        print_board(board_state[14], board_state[15])
 
     # Display the board.
     print("Final board state.")
@@ -287,13 +287,13 @@ def main(game_history_filename, starting_network_file=None, best_network_file=No
 
     # Play games, optimize neural networks, and evaluate progress.
     self_play_loop.run()
-    optimization_loop_func(game_history_file, player_nn)
+    #optimization_loop_func(game_history_file, player_nn)
     #evalutation_loop.start()
 
 
     game_history_file.close()
 
-main("game_history_sep_7.h5")
+main("game_history_sep_21_w_supervised_start.h5", "young_saigon_supervised.h5")
 
 
 

@@ -70,8 +70,13 @@ def optimization(player_nn, mini_batch_num):
             game_key = "game_" + str(random_game)
             game_group = int((random_game + 1) / 1000)
             game_history_file = h5py.File("downloaded_game_data_" + str(game_group) + ".h5", "r")
+            num_moves = game_history_file[game_key]["move_history"].shape[0]
+            if num_moves < 50:
+                continue
             move_range_low = 0
-            move_range_high = game_history_file[game_key]["move_history"].shape[0] - 1
+            #move_range_high = game_history_file[game_key]["move_history"].shape[0] - 1 # Train on all moves.
+            move_range_high = 15 # Train on opening moves only.
+
             random_move = random.randint(move_range_low, move_range_high)
 
             # Add to the training data.
@@ -101,7 +106,7 @@ def optimization(player_nn, mini_batch_num):
 
 def optimization_loop_func():
     # Create the player.
-    player_nn = PolicyValueNetwork(0.01)
+    player_nn = PolicyValueNetwork(0.01, "young_saigon_supervised.h5")
     player_nn.save_model_to_file("young_saigon_supervised.h5")
     mini_batch_num = 0
     while True:

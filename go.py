@@ -203,6 +203,48 @@ def board_pos_after_move(current_board, previous_board, move_idx, stone_value):
     # Otherwise, the move was completely legal! Return the new board state, with captured stones removed.
     return {"move_legal": True, "board_outcome": proposed_board}
 
+def get_liberty_counts_from_board(current_board, friendly_value):
+    string_board = [-1]*169  # If a string is here, it will store the id of this string.
+    string_count = 0
+    string_liberty_counts = {}  # Key: string id, value: liberty count.A
+    liberties_board = [[]]*169
+    friendly_lib_count = [0]*169
+    enemy_lib_count = [0]*169
+
+    for idx in range(169):
+        # If this stone has already been considered, continue.
+        if string_board[idx] != -1:
+            continue
+        # If a stone is here, it is a string.
+        if current_board[idx] is not 0:
+            stone_value = current_board[idx]
+            string_board[idx] = string_count
+            string_liberty_counts[string_count] = 0
+            current_string = [idx]
+            for stone_idx in current_string:
+                adjacent_stones = get_adjacent_intersections(stone_idx, current_board)
+                for adjacent_stone in adjacent_stones:
+                    adj_stone_idx = adjacent_stone[0]
+                    adj_stone_value = adjacent_stone[1]
+                    # If the adjacent stone value matches the strings value,
+                    # and the stone has not been considered yet, add it to the string.
+                    if adj_stone_value == stone_value and string_board[adj_stone_idx] == -1:
+                        current_string.append(adj_stone_idx)
+                        string_board[adj_stone_idx] = string_count
+                    # Otherwise, if the adjacent stones value is 0, it is a liberty.
+                    if adj_stone_value == 0 and string_count not in liberties_board[adj_stone_idx]:
+                        string_liberty_counts[string_count] += 1
+                        liberties_board[adj_stone_idx].append(string_count)
+            # Set the value of the liberties for this string.
+            for stone_idx in current_string:
+                if current_board[stone_idx] == friendly_value:
+                    friendly_lib_count[stone_idx] = string_liberty_counts[string_count]
+                else:
+                    enemy_lib_count[stone_idx] = string_liberty_counts[string_count]
+
+            # Now that we are done with this string, increment the string count.
+            string_count += 1
+
 
 def get_all_legal_moves_from_board_state(board_state):
     """
@@ -245,7 +287,7 @@ def get_all_legal_moves_from_board_state(board_state):
                     # Otherwise, if the adjacent stones value is 0, it is a liberty.
                     if adj_stone_value == 0 and string_count not in liberties_board[adj_stone_idx]:
                         string_liberty_counts[string_count] += 1
-                        liberties_board.append(string_count)
+                        liberties_board[adjacent_stone_idx].append(string_count)
 
             # Now that we are done with this string, increment the string count.
             string_count += 1

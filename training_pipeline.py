@@ -293,7 +293,7 @@ def main(game_history_filename, starting_network_file=None, best_network_file=No
 
     game_history_file.close()
 
-main("game_history_sep_21_w_supervised_start.h5", "young_saigon_supervised.h5")
+main("game_history_sep_22_w_supervised_start.h5")
 
 
 

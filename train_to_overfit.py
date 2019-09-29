@@ -1,5 +1,5 @@
 from go import *
-from neural_network import *
+from neural_network_lib_layers import *
 import h5py
 import numpy as np
 import threading
@@ -19,7 +19,7 @@ def get_input_ground_truth_pairs(game_history_file, game_number, move_number):
     game_key = "game_" + str(game_number)
 
     # Next, get the outcome of the game.
-    y_true_value = game_history_file[game_key]["outcome"][()]  # If this number is 1, black won. Otherwise, if -1, white won.
+    y_true_value = game_history_file[game_key]["outcome"][()]
     # Get the player to make the move.
     player_to_make_move = "black" if move_number % 2 == 0 else "white"
     # Set y_true_value to reflect the player making the move (stored in database as outcome relative to black player).
@@ -39,6 +39,13 @@ def get_input_ground_truth_pairs(game_history_file, game_number, move_number):
     # Get the state for the last 8 moves
     board_state = get_full_state_from_byte_board_history(last_eight_moves, player_to_make_move)
 
+    # Add the liberty counts to the board state.
+    friendly_value = 1 if player_to_make_move is "black" else 2
+    current_board = game_history_file[game_key]["move_history"][move_number-1, 0:169]
+    friendly, enemy = get_liberty_counts_from_board(current_board, friendly_value)
+    board_state.append(friendly)
+    board_state.append(enemy)
+
     y_true_policy = [0] * 170
     mcts_selected_move = int(game_history_file[game_key]["move_history"][move_number - 1, -1])
     y_true_policy[mcts_selected_move] = 1
@@ -49,19 +56,18 @@ def get_input_ground_truth_pairs(game_history_file, game_number, move_number):
 def optimization(player_nn, mini_batch_num):
     """
     This function trains the neural network, using the move histories and game outcomes in the game history file.
-    When training on 64 GPUs, each GPU used a minibatch size of 32, for a total minibatch size of 2048.
+    When training on 64 GPUs, each GPU used a minibatch size of 32, for a total minibatch size of 32.
     Here, we will just use a minibatch size of 32.
     :param player_nn: a PolicyValueNetwork to train.
     :param mini_batch_num: an integer that shows which minibatch this is.
     """
 
-    print("Optimizing on minibatch " + str(mini_batch_num))
 
     # Next, randomly select moves to train on.
     training_data = {"inputs": [], "y_true_values": [], "y_true_policies": []}
 
     games_added = 0
-    while games_added < 2048:
+    while games_added < 32:
         try:
             # Randomly select a game.
             game_range_low = 0
@@ -76,8 +82,8 @@ def optimization(player_nn, mini_batch_num):
             if num_moves < 50:
                 continue
             move_range_low = 0
-            #move_range_high = game_history_file[game_key]["move_history"].shape[0] - 1 # Train on all moves.
-            move_range_high = 15 # Train on opening moves only.
+            move_range_high = game_history_file[game_key]["move_history"].shape[0] - 1 # Train on all moves.
+            #move_range_high = 15 # Train on opening moves only.
 
             random_move = random.randint(move_range_low, move_range_high)
 
@@ -95,24 +101,25 @@ def optimization(player_nn, mini_batch_num):
             print("failing to access game " + str(random_game))
             continue
 
-    reshaped_inputs = np.reshape(np.array(training_data["inputs"]), (2048, 13, 13, 17))
-    reshaped_gt_values = np.reshape(np.array(training_data["y_true_values"]), (2048, 1))
-    reshaped_gt_policies = np.reshape(np.array(training_data["y_true_policies"]), (2048, 170))
+    reshaped_inputs = np.reshape(np.array(training_data["inputs"]), (32, 13, 13, 19))
+    reshaped_gt_values = np.reshape(np.array(training_data["y_true_values"]), (32, 1))
+    reshaped_gt_policies = np.reshape(np.array(training_data["y_true_policies"]), (32, 170))
 
-    player_nn.train_supervised(reshaped_inputs,
-                               reshaped_gt_values,
-                               reshaped_gt_policies,
-                               "young_saigon_supervised.h5")
+    while True:
+        print("Optimizing on minibatch " + str(mini_batch_num))
+        player_nn.train_supervised(reshaped_inputs,
+                                   reshaped_gt_values,
+                                   reshaped_gt_policies,
+                                   "overfit.h5")
+        mini_batch_num += 1
     return 1
 
 
 def optimization_loop_func():
     # Create the player.
-    player_nn = PolicyValueNetwork(0.01, "young_saigon_supervised.h5")
-    player_nn.save_model_to_file("young_saigon_supervised.h5")
-    mini_batch_num = 0
-    while True:
-        mini_batch_num += optimization(player_nn, mini_batch_num)
+    player_nn = PolicyValueNetwork(0.01)
+    player_nn.save_model_to_file("overfit.h5")
+    optimization(player_nn, 0)
 
 
 optimization_loop_func()

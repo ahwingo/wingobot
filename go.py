@@ -68,8 +68,8 @@ def get_full_state_from_byte_board_history(byte_boards, player_to_go_next):
 
     boards = []
     for byte_board in byte_boards:
-        curr_player_board = [1 if x is curr_player_value else 0 for x in byte_board]
-        next_player_board = [1 if x is next_player_value else 0 for x in byte_board]
+        curr_player_board = [1 if int(x) is curr_player_value else 0 for x in byte_board]
+        next_player_board = [1 if int(x) is next_player_value else 0 for x in byte_board]
         boards.append(curr_player_board)
         boards.append(next_player_board)
     player_to_go_board = [player_to_go_value]*169
@@ -204,6 +204,11 @@ def board_pos_after_move(current_board, previous_board, move_idx, stone_value):
     return {"move_legal": True, "board_outcome": proposed_board}
 
 def get_liberty_counts_from_board(current_board, friendly_value):
+    """
+    Returns two boards, one for friendly stone liberty counts, one for non friendly liberty counts.
+    Counts are returned as 1.0 - (string lib count) / 10.0, where string lib count is capped at 8.
+    This is done to keep these layers at the same scale as the other binary inputs.
+    """
     string_board = [-1]*169  # If a string is here, it will store the id of this string.
     string_count = 0
     string_liberty_counts = {}  # Key: string id, value: liberty count.A
@@ -236,14 +241,17 @@ def get_liberty_counts_from_board(current_board, friendly_value):
                         string_liberty_counts[string_count] += 1
                         liberties_board[adj_stone_idx].append(string_count)
             # Set the value of the liberties for this string.
+            lib_value = 1.0 - float(max(8, string_liberty_counts[string_count])) / 10.0
             for stone_idx in current_string:
                 if current_board[stone_idx] == friendly_value:
-                    friendly_lib_count[stone_idx] = string_liberty_counts[string_count]
+                    friendly_lib_count[stone_idx] = lib_value
                 else:
-                    enemy_lib_count[stone_idx] = string_liberty_counts[string_count]
+                    enemy_lib_count[stone_idx] = lib_value
 
             # Now that we are done with this string, increment the string count.
             string_count += 1
+
+    return friendly_lib_count, enemy_lib_count
 
 
 def get_all_legal_moves_from_board_state(board_state):
@@ -287,7 +295,7 @@ def get_all_legal_moves_from_board_state(board_state):
                     # Otherwise, if the adjacent stones value is 0, it is a liberty.
                     if adj_stone_value == 0 and string_count not in liberties_board[adj_stone_idx]:
                         string_liberty_counts[string_count] += 1
-                        liberties_board[adjacent_stone_idx].append(string_count)
+                        liberties_board[adj_stone_idx].append(string_count)
 
             # Now that we are done with this string, increment the string count.
             string_count += 1
@@ -361,6 +369,7 @@ def update_board_state_for_move(action_idx, board_state):
     curr_board = [curr_state_curr_player[idx] - curr_state_next_player[idx] for idx in range(169)]
     prev_board = [prev_state_curr_player[idx] - prev_state_next_player[idx] for idx in range(169)]
     next_board = board_pos_after_move(curr_board, prev_board, action_idx, 1)["board_outcome"]
+    print(next_board)
     new_state_curr_player = [0]*169
     new_state_next_player = [0]*169
     for idx in range(169):

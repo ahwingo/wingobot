@@ -1,5 +1,5 @@
 from go import *
-from neural_network_lib_layers import *
+#from neural_network_lib_layers import *
 import h5py
 import numpy as np
 import threading
@@ -57,14 +57,6 @@ def get_input_ground_truth_pairs(game_history_file, game_number, move_number):
     board_state.append(friendly)
     board_state.append(enemy)
 
-    print("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
-    print(" showing board states loaded from file...." )
-    print_board(board_state[8], board_state[9])
-    print_board(board_state[10], board_state[11])
-    print_board(board_state[12], board_state[13])
-    print_board(board_state[14], board_state[15])
-    print("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
-
     y_true_policy = [0] * 170
     mcts_selected_move = int(game_history_file[game_key]["move_history"][move_number - 1, -1])
     y_true_policy[mcts_selected_move] = 1
@@ -99,7 +91,7 @@ def get_random_game_move_data():
             num_moves = game_history_file[game_key]["move_history"].shape[0]
             if num_moves < 50:
                 continue
-            move_range_low = 0
+            move_range_low = 1
             move_range_high = game_history_file[game_key]["move_history"].shape[0] - 1 # Train on all moves.
             #move_range_high = 15 # Train on opening moves only.
 
@@ -121,9 +113,24 @@ def get_random_game_move_data():
             print("failing to access game " + str(random_game))
             continue
 
-    reshaped_inputs = np.reshape(np.array(training_data["inputs"]), (1, 13, 13, 19))
+
+    print("np.array.shape = ", np.array(training_data["inputs"]).shape)
+
+
+    #reshaped_inputs = np.array([np.reshape(np.array(x), (13,13)) for x in training_data["inputs"][0]])
+    reshaped_inputs = np.reshape(np.array(training_data["inputs"]), (1, 19, 13, 13))
+    print(reshaped_inputs.shape)
     reshaped_gt_values = np.reshape(np.array(training_data["y_true_values"]), (1, 1))
     reshaped_gt_policies = np.reshape(np.array(training_data["y_true_policies"]), (1, 170))
+
+    print("---------------------------------")
+    print(" training data inputs 5 = ")
+    print(training_data["inputs"][0][10])
+
+    print("---------------------------------")
+    print(" reshaped training data inputs 5 = ")
+    print(reshaped_inputs[0,10,...])
+    print("---------------------------------")
 
     return {"inputs": reshaped_inputs, "gt_values": reshaped_gt_values, "gt_policies": reshaped_gt_policies}
 
@@ -157,7 +164,7 @@ def prediction_loop(player_nn):
 
 def main():
     # Create the player.
-    player_nn = PolicyValueNetwork(0.0001, starting_network_file="young_saigon_supervised_w_libs_by_the_book.h5", train_supervised=True)
+    #player_nn = PolicyValueNetwork(0.0001)
 
     # Create and run a handful of data prep threads.
     for x in range(1):
@@ -165,7 +172,7 @@ def main():
         dp_thread.start()
 
     # Run the optimzation loop on this thread.
-    prediction_loop(player_nn)
+    #prediction_loop(player_nn)
 
 # Run the main function.
 main()

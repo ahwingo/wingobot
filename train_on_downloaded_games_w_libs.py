@@ -83,7 +83,7 @@ def get_2048_training_batch():
             num_moves = game_history_file[game_key]["move_history"].shape[0]
             if num_moves < 50:
                 continue
-            move_range_low = 0
+            move_range_low = 1
             move_range_high = game_history_file[game_key]["move_history"].shape[0] - 1 # Train on all moves.
             #move_range_high = 15 # Train on opening moves only.
 
@@ -105,7 +105,7 @@ def get_2048_training_batch():
             print("failing to access game " + str(random_game))
             continue
 
-    reshaped_inputs = np.reshape(np.array(training_data["inputs"]), (2048, 13, 13, 19))
+    reshaped_inputs = np.reshape(np.array(training_data["inputs"]), (2048, 19, 13, 13))
     reshaped_gt_values = np.reshape(np.array(training_data["y_true_values"]), (2048, 1))
     reshaped_gt_policies = np.reshape(np.array(training_data["y_true_policies"]), (2048, 170))
 
@@ -126,14 +126,14 @@ def optimization_loop(player_nn):
             inputs = training_data["inputs"]
             gt_values = training_data["gt_values"]
             gt_policies = training_data["gt_policies"]
-            player_nn.train_supervised(inputs, gt_values, gt_policies, "young_saigon_supervised_w_libs_by_the_book.h5")
+            player_nn.train_supervised(inputs, gt_values, gt_policies, "young_goon.h5")
             mini_batch_num += 1
 
 
 def main():
     # Create the player.
-    player_nn = PolicyValueNetwork(0.0001, starting_network_file="young_saigon_supervised_w_libs_by_the_book.h5", train_supervised=True)
-    player_nn.save_model_to_file("young_saigon_supervised_w_libs_by_the_book.h5")
+    player_nn = PolicyValueNetwork(0.0001, train_supervised=True)
+    player_nn.save_model_to_file("young_goon.h5")
 
     # Create and run a handful of data prep threads.
     for x in range(1):

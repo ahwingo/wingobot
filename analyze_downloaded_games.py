@@ -41,7 +41,8 @@ def get_index_for_move_code(move_code):
 def load_downloaded_games():
 
     # Open the H5 file that will be used.
-    game_history_file = h5py.File("downloaded_game_data.h5", 'w')
+    num_thousands = 0
+    game_history_file = h5py.File("downloaded_game_data_" + str(num_thousands) + ".h5", 'w')
 
     # Open the file that contains all the paths to downloaded sgf files.
     with open("Go_Games_13x13/files.txt", "r") as f:
@@ -138,6 +139,10 @@ def load_downloaded_games():
             move_history = np.array(move_history, dtype='b')
 
             # Store the outcome of the game.
+            if (game_number + 1) % 1000 is 0:
+                num_thousands = int((game_number+1) / 1000)
+                game_history_file.close()
+                game_history_file = h5py.File("downloaded_game_data_" + str(num_thousands) + ".h5", 'w')
             save_game_data(game_number, game_outcome, move_history, game_history_file)
 
             # Increment the number of games.

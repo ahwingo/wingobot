@@ -105,6 +105,7 @@ def get_2048_training_batch():
             print("failing to access game " + str(random_game))
             continue
 
+    width_height_depth = [[[training_data["inputs"][k][j][i] for j in range(19)] for i in range(169)] for k in range(2048)]
     reshaped_inputs = np.reshape(np.array(training_data["inputs"]), (2048, 19, 13, 13))
     reshaped_gt_values = np.reshape(np.array(training_data["y_true_values"]), (2048, 1))
     reshaped_gt_policies = np.reshape(np.array(training_data["y_true_policies"]), (2048, 170))

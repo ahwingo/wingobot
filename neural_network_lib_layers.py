@@ -28,7 +28,7 @@ class PolicyValueNetwork:
                                    metrics=[metrics.mae, metrics.categorical_accuracy])
             return
 
-        inputs = Input(shape=(19, 13, 13))
+        inputs = Input(shape=(13, 13, 19))
 
         conv_block = Conv2D(filters=256,
                             kernel_size=(3, 3),

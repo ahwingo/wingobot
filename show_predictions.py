@@ -118,7 +118,8 @@ def get_random_game_move_data():
 
 
     #reshaped_inputs = np.array([np.reshape(np.array(x), (13,13)) for x in training_data["inputs"][0]])
-    reshaped_inputs = np.reshape(np.array(training_data["inputs"]), (1, 19, 13, 13))
+    width_height_depth = [[training_data["inputs"][0][j][i] for j in range(19)] for i in range(169)]
+    reshaped_inputs = np.reshape(np.array(width_height_depth), (1, 13, 13, 19))
     print(reshaped_inputs.shape)
     reshaped_gt_values = np.reshape(np.array(training_data["y_true_values"]), (1, 1))
     reshaped_gt_policies = np.reshape(np.array(training_data["y_true_policies"]), (1, 170))
@@ -129,7 +130,7 @@ def get_random_game_move_data():
 
     print("---------------------------------")
     print(" reshaped training data inputs 5 = ")
-    print(reshaped_inputs[0,10,...])
+    print(reshaped_inputs[0,...,10])
     print("---------------------------------")
 
     return {"inputs": reshaped_inputs, "gt_values": reshaped_gt_values, "gt_policies": reshaped_gt_policies}

@@ -44,9 +44,13 @@ def get_input_ground_truth_pairs(game_history_file, game_number, move_number):
 
     print("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
     print(" showing board states loaded from file...." )
+    print(int(game_history_file[game_key]["move_history"][move_number - 4, -1])//13," ", int(game_history_file[game_key]["move_history"][move_number - 4, -1])%13)
     print_board(board_state[8], board_state[9])
+    print(int(game_history_file[game_key]["move_history"][move_number - 3, -1])//13," ",int(game_history_file[game_key]["move_history"][move_number - 3, -1])%13)
     print_board(board_state[10], board_state[11])
+    print(int(game_history_file[game_key]["move_history"][move_number - 2, -1])//13," ",int(game_history_file[game_key]["move_history"][move_number - 2, -1])%13)
     print_board(board_state[12], board_state[13])
+    print(int(game_history_file[game_key]["move_history"][move_number - 1, -1])//13," ",int(game_history_file[game_key]["move_history"][move_number - 1, -1])%13)
     print_board(board_state[14], board_state[15])
     print("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
 
@@ -59,6 +63,16 @@ def get_input_ground_truth_pairs(game_history_file, game_number, move_number):
 
     y_true_policy = [0] * 170
     mcts_selected_move = int(game_history_file[game_key]["move_history"][move_number - 1, -1])
+
+
+    if mcts_selected_move < 0:
+        print(mcts_selected_move)
+        print(game_history_file[game_key]["move_history"][move_number - 1, -1])
+        print(type(game_history_file[game_key]["move_history"]))
+        print("jhj;kljl;kjl;kjlkj;lk \n\n\n\n asfdasdfasdfasdfasdfasdf \n\n\n\n\n")
+        exit()
+
+	
     y_true_policy[mcts_selected_move] = 1
 
     return board_state, y_true_value, y_true_policy

@@ -7,8 +7,10 @@ import random
 import time
 import queue
 
+
 # Define a global Queue
 training_batches = queue.Queue()
+
 
 def get_input_ground_truth_pairs(game_history_file, game_number, move_number):
     """
@@ -54,6 +56,15 @@ def get_input_ground_truth_pairs(game_history_file, game_number, move_number):
     print_board(board_state[14], board_state[15])
     print("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
 
+
+    # Check if any of the moves has a negative value...
+    moves = [int(game_history_file[game_key]["move_history"][move_number - x, -1]) for x in [1,2,3,4]]
+    for mov in moves:
+        if mov < 0:
+            print("A move was negative....")
+            exit()
+
+
     # Add the liberty counts to the board state.
     friendly_value = 1 if player_to_make_move is "black" else 2
     current_board = game_history_file[game_key]["move_history"][move_number-1, 0:169]
@@ -72,7 +83,6 @@ def get_input_ground_truth_pairs(game_history_file, game_number, move_number):
         print("jhj;kljl;kjl;kjlkj;lk \n\n\n\n asfdasdfasdfasdfasdfasdf \n\n\n\n\n")
         exit()
 
-	
     y_true_policy[mcts_selected_move] = 1
 
     return board_state, y_true_value, y_true_policy
@@ -101,7 +111,7 @@ def get_random_game_move_data():
             # From that game, randomly select a move.
             game_key = "game_" + str(random_game)
             game_group = int((random_game + 1) / 1000)
-            game_history_file = h5py.File("downloaded_game_data_" + str(game_group) + ".h5", "r")
+            game_history_file = h5py.File("downloaded_game_data_new/downloaded_game_data_" + str(game_group) + ".h5", "r")
             num_moves = game_history_file[game_key]["move_history"].shape[0]
             if num_moves < 50:
                 continue

@@ -89,7 +89,7 @@ class PolicyValueNetwork:
         # Save the model so we can load it in a different thread!!
         #self.save_model_to_file("young_saigon.h5")
 
-    def load_latest_model():
+    def load_latest_model(self):
         self.model = keras.models.load_model("young_saigon.h5")
 
     def create_res_block(self, input_layer):

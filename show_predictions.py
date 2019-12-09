@@ -56,7 +56,6 @@ def get_input_ground_truth_pairs(game_history_file, game_number, move_number):
     #print_board(board_state[14], board_state[15])
     #print("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
 
-
     # Check if any of the moves has a negative value...
     moves = [int(game_history_file[game_key]["move_history"][move_number - x, -1]) for x in [1,2,3,4]]
     for mov in moves:

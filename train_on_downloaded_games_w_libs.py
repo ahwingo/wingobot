@@ -72,21 +72,23 @@ def get_2048_training_batch():
     while games_added < 2048:
         try:
             # Randomly select a game.
-            game_range_low = 0
-            game_range_high = 124393
+            game_range_low = 1000
+            game_range_high = 117000
             random_game = random.randint(game_range_low, game_range_high)
 
             # From that game, randomly select a move.
             game_key = "game_" + str(random_game)
             game_group = int((random_game + 1) / 1000)
-            game_history_file = h5py.File("downloaded_game_data_" + str(game_group) + ".h5", "r")
+            game_history_file = h5py.File("downloaded_game_data_new/downloaded_game_data_" + str(game_group) + ".h5", "r")
             num_moves = game_history_file[game_key]["move_history"].shape[0]
             if num_moves < 50:
                 continue
             move_range_low = 1
-            move_range_high = game_history_file[game_key]["move_history"].shape[0] - 1 # Train on all moves.
+            # Train on the first 50 moves only.
+            total_moves = game_history_file[game_key]["move_history"].shape[0] - 1
+            move_range_high = min(total_moves, 50)
+            #move_range_high = game_history_file[game_key]["move_history"].shape[0] - 1 # Train on all moves.
             #move_range_high = 15 # Train on opening moves only.
-
             random_move = random.randint(move_range_low, move_range_high)
 
             # Add to the training data.
@@ -105,8 +107,8 @@ def get_2048_training_batch():
             print("failing to access game " + str(random_game))
             continue
 
-    width_height_depth = [[[training_data["inputs"][k][j][i] for j in range(19)] for i in range(169)] for k in range(2048)]
-    reshaped_inputs = np.reshape(np.array(training_data["inputs"]), (2048, 19, 13, 13))
+    #width_height_depth = [[[training_data["inputs"][k][j][i] for j in range(19)] for i in range(169)] for k in range(2048)]
+    reshaped_inputs = np.reshape(np.array(training_data["inputs"]), (2048, 13, 13, 19))
     reshaped_gt_values = np.reshape(np.array(training_data["y_true_values"]), (2048, 1))
     reshaped_gt_policies = np.reshape(np.array(training_data["y_true_policies"]), (2048, 170))
 
@@ -117,6 +119,7 @@ def data_prep_thread(thread_num):
     while True:
         training_data = get_2048_training_batch()
         training_batches.put(training_data)
+
 
 def optimization_loop(player_nn):
     mini_batch_num = 0

@@ -369,7 +369,7 @@ def update_board_state_for_move(action_idx, board_state):
     curr_board = [curr_state_curr_player[idx] - curr_state_next_player[idx] for idx in range(169)]
     prev_board = [prev_state_curr_player[idx] - prev_state_next_player[idx] for idx in range(169)]
     next_board = board_pos_after_move(curr_board, prev_board, action_idx, 1)["board_outcome"]
-    print(next_board)
+    #print(next_board)
     new_state_curr_player = [0]*169
     new_state_next_player = [0]*169
     for idx in range(169):

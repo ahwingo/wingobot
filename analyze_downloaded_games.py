@@ -136,13 +136,14 @@ def load_downloaded_games():
                 board_state = update_board_state_for_move(action_idx, board_state)
 
             # Convert the move history array to a np array.
-            move_history = np.array(move_history, dtype='b')
+            # NOTE: Moves, which range from 0 to 168 should be stored as unsigned bytes (ie dtype='B", not dtype='b')!!!
+            move_history = np.array(move_history, dtype='B')
 
             # Store the outcome of the game.
             if (game_number + 1) % 1000 is 0:
                 num_thousands = int((game_number+1) / 1000)
                 game_history_file.close()
-                game_history_file = h5py.File("downloaded_game_data_" + str(num_thousands) + ".h5", 'w')
+                game_history_file = h5py.File("downloaded_game_data_new/downloaded_game_data_" + str(num_thousands) + ".h5", 'w')
             save_game_data(game_number, game_outcome, move_history, game_history_file)
 
             # Increment the number of games.

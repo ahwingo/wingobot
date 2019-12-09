@@ -1,5 +1,5 @@
 from go import *
-#from neural_network_lib_layers import *
+from neural_network_lib_layers import *
 import h5py
 import numpy as np
 import threading
@@ -7,8 +7,10 @@ import random
 import time
 import queue
 
+
 # Define a global Queue
 training_batches = queue.Queue()
+
 
 def get_input_ground_truth_pairs(game_history_file, game_number, move_number):
     """
@@ -42,13 +44,26 @@ def get_input_ground_truth_pairs(game_history_file, game_number, move_number):
     # Get the state for the last 8 moves
     board_state = get_full_state_from_byte_board_history(last_eight_moves, player_to_make_move)
 
-    print("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
-    print(" showing board states loaded from file...." )
-    print_board(board_state[8], board_state[9])
-    print_board(board_state[10], board_state[11])
-    print_board(board_state[12], board_state[13])
-    print_board(board_state[14], board_state[15])
-    print("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
+    #print("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
+    #print(" showing board states loaded from file...." )
+    #print(int(game_history_file[game_key]["move_history"][move_number - 4, -1])//13," ", int(game_history_file[game_key]["move_history"][move_number - 4, -1])%13)
+    #print_board(board_state[8], board_state[9])
+    #print(int(game_history_file[game_key]["move_history"][move_number - 3, -1])//13," ",int(game_history_file[game_key]["move_history"][move_number - 3, -1])%13)
+    #print_board(board_state[10], board_state[11])
+    #print(int(game_history_file[game_key]["move_history"][move_number - 2, -1])//13," ",int(game_history_file[game_key]["move_history"][move_number - 2, -1])%13)
+    #print_board(board_state[12], board_state[13])
+    #print(int(game_history_file[game_key]["move_history"][move_number - 1, -1])//13," ",int(game_history_file[game_key]["move_history"][move_number - 1, -1])%13)
+    #print_board(board_state[14], board_state[15])
+    #print("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
+
+
+    # Check if any of the moves has a negative value...
+    moves = [int(game_history_file[game_key]["move_history"][move_number - x, -1]) for x in [1,2,3,4]]
+    for mov in moves:
+        if mov < 0:
+            print("A move was negative....")
+            exit()
+
 
     # Add the liberty counts to the board state.
     friendly_value = 1 if player_to_make_move is "black" else 2
@@ -59,6 +74,15 @@ def get_input_ground_truth_pairs(game_history_file, game_number, move_number):
 
     y_true_policy = [0] * 170
     mcts_selected_move = int(game_history_file[game_key]["move_history"][move_number - 1, -1])
+
+
+    if mcts_selected_move < 0:
+        print(mcts_selected_move)
+        print(game_history_file[game_key]["move_history"][move_number - 1, -1])
+        print(type(game_history_file[game_key]["move_history"]))
+        print("jhj;kljl;kjl;kjlkj;lk \n\n\n\n asfdasdfasdfasdfasdfasdf \n\n\n\n\n")
+        exit()
+
     y_true_policy[mcts_selected_move] = 1
 
     return board_state, y_true_value, y_true_policy
@@ -80,14 +104,14 @@ def get_random_game_move_data():
     while games_added < 1:
         try:
             # Randomly select a game.
-            game_range_low = 0
-            game_range_high = 124393
+            game_range_low = 1000
+            game_range_high = 117000
             random_game = random.randint(game_range_low, game_range_high)
 
             # From that game, randomly select a move.
             game_key = "game_" + str(random_game)
             game_group = int((random_game + 1) / 1000)
-            game_history_file = h5py.File("downloaded_game_data_" + str(game_group) + ".h5", "r")
+            game_history_file = h5py.File("downloaded_game_data_new/downloaded_game_data_" + str(game_group) + ".h5", "r")
             num_moves = game_history_file[game_key]["move_history"].shape[0]
             if num_moves < 50:
                 continue
@@ -114,24 +138,24 @@ def get_random_game_move_data():
             continue
 
 
-    print("np.array.shape = ", np.array(training_data["inputs"]).shape)
+    #print("np.array.shape = ", np.array(training_data["inputs"]).shape)
 
 
     #reshaped_inputs = np.array([np.reshape(np.array(x), (13,13)) for x in training_data["inputs"][0]])
     width_height_depth = [[training_data["inputs"][0][j][i] for j in range(19)] for i in range(169)]
     reshaped_inputs = np.reshape(np.array(width_height_depth), (1, 13, 13, 19))
-    print(reshaped_inputs.shape)
+    #print(reshaped_inputs.shape)
     reshaped_gt_values = np.reshape(np.array(training_data["y_true_values"]), (1, 1))
     reshaped_gt_policies = np.reshape(np.array(training_data["y_true_policies"]), (1, 170))
 
-    print("---------------------------------")
-    print(" training data inputs 5 = ")
-    print(training_data["inputs"][0][10])
+    #print("---------------------------------")
+    #print(" training data inputs 5 = ")
+    #print(training_data["inputs"][0][10])
 
-    print("---------------------------------")
-    print(" reshaped training data inputs 5 = ")
-    print(reshaped_inputs[0,...,10])
-    print("---------------------------------")
+    #print("---------------------------------")
+    #print(" reshaped training data inputs 5 = ")
+    #print(reshaped_inputs[0,...,10])
+    #print("---------------------------------")
 
     return {"inputs": reshaped_inputs, "gt_values": reshaped_gt_values, "gt_policies": reshaped_gt_policies}
 
@@ -156,8 +180,7 @@ def prediction_loop(player_nn):
             for i in range(19):
                 board_state_old.append(np.reshape(inputs, (169, 19))[...,i])
             print_board(board_state_old[14], board_state_old[15])
-            print("\n\nBoard after move at index ", action_idx,":")
-            print(len(board_state_old[:17]))
+            print("\n\nBoard after move at row ", action_idx//13, " column ",action_idx%13,":")
             board_state = update_board_state_for_move(action_idx, board_state_old[:17])
             print_board(board_state[15], board_state[14])
             print("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
@@ -165,7 +188,7 @@ def prediction_loop(player_nn):
 
 def main():
     # Create the player.
-    #player_nn = PolicyValueNetwork(0.0001)
+    player_nn = PolicyValueNetwork(0.0001, starting_network_file="young_goon_acc26.h5")
 
     # Create and run a handful of data prep threads.
     for x in range(1):
@@ -173,7 +196,7 @@ def main():
         dp_thread.start()
 
     # Run the optimzation loop on this thread.
-    #prediction_loop(player_nn)
+    prediction_loop(player_nn)
 
 # Run the main function.
 main()

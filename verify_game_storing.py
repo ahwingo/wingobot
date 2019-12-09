@@ -115,6 +115,9 @@ def load_downloaded_games():
             board_state = update_board_state_for_move(action_idx, board_state)
             print_board(board_state[15], board_state[14])
 
+            input()
+
+
             # Increment the number of games.
             game_number += 1
             if game_number % 100 is 0:

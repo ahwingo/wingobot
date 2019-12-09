@@ -22,7 +22,7 @@ class PolicyValueNetwork:
         if starting_network_file:
             self.model = keras.models.load_model(starting_network_file)
             if train_supervised:
-                self.model.compile(optimizer=keras.optimizers.SGD(learning_rate=0.05, momentum=0.9),
+                self.model.compile(optimizer=keras.optimizers.SGD(learning_rate=0.01, momentum=0.9),
                                    loss={"value": keras.losses.mean_squared_error, "policy": keras.losses.categorical_crossentropy},
                                    loss_weights=[0.01, 1.0],
                                    metrics=[metrics.mae, metrics.categorical_accuracy])
@@ -74,7 +74,7 @@ class PolicyValueNetwork:
 
         self.model = Model(inputs=inputs, outputs=[value, policy])
         if train_supervised:
-            self.model.compile(optimizer=keras.optimizers.SGD(learning_rate=0.1, momentum=0.9),
+            self.model.compile(optimizer=keras.optimizers.SGD(learning_rate=0.01, momentum=0.9),
                                loss={"value": keras.losses.mean_squared_error, "policy": keras.losses.categorical_crossentropy},
                                loss_weights=[0.01, 1.0],
                                metrics=[metrics.mae, metrics.categorical_accuracy])
@@ -89,7 +89,7 @@ class PolicyValueNetwork:
         # Save the model so we can load it in a different thread!!
         #self.save_model_to_file("young_saigon.h5")
 
-    def load_latest_model():
+    def load_latest_model(self):
         self.model = keras.models.load_model("young_saigon.h5")
 
     def create_res_block(self, input_layer):
@@ -153,10 +153,11 @@ class PolicyValueNetwork:
         :param training_data: a numpy array of
         """
         # Load a copy of the model for training.
+        print("training")
         self.model.fit(x=training_data_input,
                        y={"value": training_data_gt_value, "policy": training_data_gt_policy},
                        batch_size=32,
-                       verbose=1)
+                       verbose=2)
                        #shuffle=True,
                        #epochs=1,
 

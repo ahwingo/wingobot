@@ -167,3 +167,7 @@ class PolicyValueNetwork:
         print("Done training!")
 
 
+    def save_checkpoint(ckpt_file):
+        self.model.save(ckpt_file)
+
+

@@ -88,7 +88,7 @@ def self_play(player, game_number, output_file):
 
     # Initialize the state of the empty board from blacks perspective.
     board_state = []
-    for _ in range(8):
+    for _ in range(16):
         board_state.append([0]*169)
     board_state.append([1]*169)
 
@@ -105,7 +105,7 @@ def self_play(player, game_number, output_file):
 
         # Black moves.
         black_mcst = mcts_lib_layers.MonteCarloSearchTree(player, board_state, temperature, root=black_root_node)
-        action_idx, black_root_node = black_mcst.search(169)
+        action_idx, black_root_node = black_mcst.search(50)
         total_moves += 1
 
         # Store the state and action.
@@ -130,7 +130,7 @@ def self_play(player, game_number, output_file):
 
         # White moves.
         white_mcst = mcts_lib_layers.MonteCarloSearchTree(player, board_state, temperature, root=white_root_node)
-        action_idx, white_root_node = white_mcst.search(169)
+        action_idx, white_root_node = white_mcst.search(50)
         total_moves += 1
 
         # Store the state and action.
@@ -312,8 +312,7 @@ def main(game_history_filename, starting_network_file=None, best_network_file=No
 
     # Play games, optimize neural networks, and evaluate progress.
     self_play_loop.run()
-    optimization_loop_func(game_history_file, player_nn)
-
+    #optimization_loop_func(game_history_file, player_nn)
     game_history_file.close()
 
 main("game_history_pretrained_acc26_dec_8.h5", starting_network_file="young_goon_sl_acc26_rl_init.h5")

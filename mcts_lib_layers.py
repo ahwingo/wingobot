@@ -183,7 +183,6 @@ class MonteCarloSearchTree:
         for _ in range(num_simulations):
             leaf = self.traverse(self.root)  # leaf = unvisited node
             sim_result = leaf.expand(self.evaluator_network)
-            print(sim_result)
             leaf.backpropagate(sim_result)
         best_action_idx = self.root.select_best_action(self.temperature)
         return best_action_idx, self.root.children[best_action_idx]

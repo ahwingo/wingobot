@@ -56,7 +56,7 @@ def get_input_ground_truth_pairs(game_history_file, game_number, move_number):
     return board_state, y_true_value, y_true_policy
 
 
-def get_2048_training_batch():
+def get_2048_training_batch(num_calls):
     """
     This function trains the neural network, using the move histories and game outcomes in the game history file.
     When training on 64 GPUs, each GPU used a minibatch size of 32, for a total minibatch size of 2048.
@@ -64,7 +64,6 @@ def get_2048_training_batch():
     :param player_nn: a PolicyValueNetwork to train.
     :param mini_batch_num: an integer that shows which minibatch this is.
     """
-
     # Next, randomly select moves to train on.
     training_data = {"inputs": [], "y_true_values": [], "y_true_policies": []}
 
@@ -84,11 +83,11 @@ def get_2048_training_batch():
             if num_moves < 50:
                 continue
             move_range_low = 1
-            # Train on the first 50 moves only.
+            # Train on the first X moves only.
+            #first_x_moves = 16  # Consider only opening moves.
+            first_x_moves = min(8 + num_calls // 50, 100)
             total_moves = game_history_file[game_key]["move_history"].shape[0] - 1
-            move_range_high = min(total_moves, 50)
-            #move_range_high = game_history_file[game_key]["move_history"].shape[0] - 1 # Train on all moves.
-            #move_range_high = 15 # Train on opening moves only.
+            move_range_high = min(total_moves, first_x_moves)
             random_move = random.randint(move_range_low, move_range_high)
 
             # Add to the training data.
@@ -102,6 +101,7 @@ def get_2048_training_batch():
             training_data["y_true_values"].append(output_value)
             training_data["y_true_policies"].append(output_policy)
             games_added += 1
+            print("here")
 
         except:
             print("failing to access game " + str(random_game))
@@ -116,8 +116,10 @@ def get_2048_training_batch():
 
 
 def data_prep_thread(thread_num):
+    num_calls = 0
     while True:
-        training_data = get_2048_training_batch()
+        num_calls += 1
+        training_data = get_2048_training_batch(num_calls)
         training_batches.put(training_data)
 
 
@@ -130,14 +132,19 @@ def optimization_loop(player_nn):
             inputs = training_data["inputs"]
             gt_values = training_data["gt_values"]
             gt_policies = training_data["gt_policies"]
-            player_nn.train_supervised(inputs, gt_values, gt_policies, "young_goon.h5")
+            player_nn.train_supervised(inputs, gt_values, gt_policies, "young_opener.h5")
             mini_batch_num += 1
+
+            # Save a checkpoint every 500 mini batches.
+            if mini_batch_num % 500 == 0:
+                ckpt_file = "young_stair_climber_ckpt_" + str(mini_batch_num) + ".h5"
+                player_nn.save_checkpoint(ckpt_file)
 
 
 def main():
     # Create the player.
-    player_nn = PolicyValueNetwork(0.0001, train_supervised=True)
-    player_nn.save_model_to_file("young_goon.h5")
+    player_nn = PolicyValueNetwork(0.0001, train_supervised=True, starting_network_file="young_opener.h5")
+    player_nn.save_model_to_file("young_stair_climber.h5")
 
     # Create and run a handful of data prep threads.
     for x in range(1):

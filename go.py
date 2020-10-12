@@ -1,11 +1,18 @@
+import numpy as np
+
+
 def tromp_taylor_score(board):
     """
     Scores a game using Tromp Taylor rules: https://codegolf.stackexchange.com/questions/6693/score-a-game-of-go
     Basically, process every empty space as a string.
     If this string is only surrounded by one player (and the edge of the board), it is that player's territory.
-    :param board: a 19x19 matrix representing board state
-    :return: the value of the winning player's stone (-1 or 1)
+    :param board: a 13x13 matrix representing board state, consiting of -1, 0, or 1 values.
+    :return: the total score (not including komi), from the perspective of the player whose stones are given as '1'.
     """
+    # Make a copy of the board and reshape it.
+    board = np.reshape(board.copy(), 169)
+
+    # Keep a list of visited indices.
     visited = []
 
     # Identify all the strings of empty spaces on the board.
@@ -47,6 +54,12 @@ def get_single_scorable_board_from_state(board_state_a, board_state_b):
 
 
 def get_single_storable_board_from_state(board_state_black, board_state_white):
+    """
+    I have not looked at this in a while, but it looks like black == 1 and white == 2...
+    :param board_state_black:
+    :param board_state_white:
+    :return:
+    """
     board = [1*board_state_black[idx] + 2*board_state_white[idx] for idx in range(169)]
     return board
 
@@ -159,6 +172,14 @@ def get_opponent_strings_of_value(a_string, board, opponent_value):
 
 
 def board_pos_after_move(current_board, previous_board, move_idx, stone_value):
+    """
+    Identifies what the new board will look like after a move is played at the given index, if its legal.
+    :param current_board: a 13 x 13 array holding values of -1, 0, or 1.
+    :param previous_board: a 13 x 13 array holding values of -1, 0, or 1.
+    :param move_idx: an integer in the range of 0 to 168 (this function does not handle passes).
+    :param stone_value: the stone value of the playing player (either 1 or -1).
+    :return: a dictionary showing if the move is legal (boolean) and the resulting board state (13 x 13 array).
+    """
     # If the move is out of bounds, return false.
     if (move_idx < 0) or (move_idx >= 169):
         return {"move_legal": False, "board_outcome": current_board}
@@ -203,29 +224,32 @@ def board_pos_after_move(current_board, previous_board, move_idx, stone_value):
     # Otherwise, the move was completely legal! Return the new board state, with captured stones removed.
     return {"move_legal": True, "board_outcome": proposed_board}
 
+
 def get_liberty_counts_from_board(current_board, friendly_value):
     """
     Returns two boards, one for friendly stone liberty counts, one for non friendly liberty counts.
-    Counts are returned as 1.0 - (string lib count) / 10.0, where string lib count is capped at 8.
+    Counts are returned as string lib count / 8.0, where string lib count is capped at 8.
     This is done to keep these layers at the same scale as the other binary inputs.
     """
+    current_board = np.reshape(current_board, 169).tolist()
     string_board = [-1]*169  # If a string is here, it will store the id of this string.
     string_count = 0
     string_liberty_counts = {}  # Key: string id, value: liberty count.A
-    liberties_board = [[]]*169
+    liberties_board = [[] for _ in range(169)]
     friendly_lib_count = [0]*169
     enemy_lib_count = [0]*169
+    enemy_value = 2 if friendly_value == 1 else 1  # The current board is made of 0s (empty) 1s (black) & 2s (white).
 
     for idx in range(169):
         # If this stone has already been considered, continue.
         if string_board[idx] != -1:
             continue
         # If a stone is here, it is a string.
-        if current_board[idx] is not 0:
+        if current_board[idx] != 0:
             stone_value = current_board[idx]
             string_board[idx] = string_count
-            string_liberty_counts[string_count] = 0
-            current_string = [idx]
+            string_liberty_counts[string_count] = 0  # Since this is the first time we have encountered this string, set its lib count to zero.
+            current_string = [idx]  # This string will contain all indices of connected stones.
             for stone_idx in current_string:
                 adjacent_stones = get_adjacent_intersections(stone_idx, current_board)
                 for adjacent_stone in adjacent_stones:
@@ -241,11 +265,12 @@ def get_liberty_counts_from_board(current_board, friendly_value):
                         string_liberty_counts[string_count] += 1
                         liberties_board[adj_stone_idx].append(string_count)
             # Set the value of the liberties for this string.
-            lib_value = 1.0 - float(max(8, string_liberty_counts[string_count])) / 10.0
+            lib_value = min(8, string_liberty_counts[string_count]) / 8.0
+            #lib_value = min(8, string_liberty_counts[string_count])
             for stone_idx in current_string:
                 if current_board[stone_idx] == friendly_value:
                     friendly_lib_count[stone_idx] = lib_value
-                else:
+                elif current_board[stone_idx] == enemy_value:
                     enemy_lib_count[stone_idx] = lib_value
 
             # Now that we are done with this string, increment the string count.
@@ -260,6 +285,9 @@ def get_all_legal_moves_from_board_state(board_state):
     :return: a 13x13 binary matrix indicating legal moves (1 = legal, 0 = illegal).
     """
 
+    # Make a copy of the board state and reshape it.
+    board_state = np.reshape(board_state.copy(), (17, 169))
+
     # Use this to indicate which moves are legal.
     legal_moves = [0]*169
 
@@ -267,9 +295,10 @@ def get_all_legal_moves_from_board_state(board_state):
     black_board = board_state[14] if board_state[16][0] == 1 else board_state[15]
     white_board = board_state[14] if board_state[16][0] == 0 else board_state[15]
     current_board = get_single_storable_board_from_state(black_board, white_board)
+
     string_board = [-1]*169  # If a string is here, it will store the id of this string.
     string_count = 0
-    liberties_board = [[]]*169
+    liberties_board = [[] for _ in range(169)]
     string_liberty_counts = {}  # Key: string id, value: liberty count.
 
     for idx in range(169):
@@ -277,7 +306,7 @@ def get_all_legal_moves_from_board_state(board_state):
         if string_board[idx] != -1:
             continue
         # If a stone is here, it is a string.
-        if current_board[idx] is not 0:
+        if current_board[idx] != 0:
             stone_value = current_board[idx]
             string_board[idx] = string_count
             string_liberty_counts[string_count] = 0
@@ -300,12 +329,30 @@ def get_all_legal_moves_from_board_state(board_state):
             # Now that we are done with this string, increment the string count.
             string_count += 1
 
+    # Print the string liberties count on the board.
+    """
+    print("\nLiberty Counts\n")
+    lib_count_print_board = []
+    for string in string_board:
+        if string in string_liberty_counts:
+            lib_count_print_board.append(string_liberty_counts[string])
+        else:
+            lib_count_print_board.append(0)
+    for lb_row in range(13):
+        lb_row_str = ""
+        for lb_col in range(13):
+            lb_row_str += str(lib_count_print_board[lb_row*13 + lb_col]) + "\t"
+        print(lb_row_str)
+    print("\n")
+    """
+
+
     # Now go back through all the intersections to find legal moves.
     playing_stone_value = 1 if board_state[16][0] == 1 else 2
     for idx in range(169):
         value_at_idx = current_board[idx]
         # If the intersection already has a stone there, the move is illegal.
-        if value_at_idx is not 0:
+        if value_at_idx != 0:
             continue
         # Get the adjacent indices.
         adjacent_stones = get_adjacent_intersections(idx, current_board)
@@ -325,7 +372,8 @@ def get_all_legal_moves_from_board_state(board_state):
                 if friendly_string_lib_count > 1:
                     move_ends_in_liberties = True
                     break
-            # If an adjaent stone is a friendly string with only one liberty, the move is legal bc it ends in capture.
+            # If an adjacent stone is a friendly string with only one liberty, the move is legal if it ends in capture.
+            #    This will be caught by one of the other adjacent stones, which must be an enemy.
             # adj_stone_value is an element of {0, 1, 2, -2}, where -2 stands for out of bounds.
             elif adj_stone_value != -2:
                 # If we get here then the adjacent stone belongs to the enemy!
@@ -340,7 +388,7 @@ def get_all_legal_moves_from_board_state(board_state):
                         break
                     else:
                         # Otherwise, increment the capture count. If other stones are captured, Ko is not broken.
-                        capture_count += 1
+                        capture_count += sum([s_id == string_id for s_id in string_board])
             # If the capture count is greater than or equal to two, then the Ko rule could not possibly be broken.
             if capture_count >= 2:
                 move_ends_in_liberties = True
@@ -355,44 +403,55 @@ def get_all_legal_moves_from_board_state(board_state):
 
 def update_board_state_for_move(action_idx, board_state):
     """
-    Does an inplace update of the board state.
+    Does an update of the board state, returning the new board from the perspective of the player who will go next.
+    Makes a copy, rather than inplace update.
     :param action_idx: the index that player a adds a stone at
-    :param board_state: the current board state (13 x 13 x 17)
+    :param board_state: the current board state (17 x 13 x 13)
     :return: an updated board state
     """
+    # Reshape the board state.
+    board_state = np.reshape(board_state.copy(), (17, 169))
+
+    # Build the current and previous boards, with 1 = friendly and -1 = enemy, given the full state.
+    curr_state_friendly_player = board_state[14]
+    curr_state_enemy_player = board_state[15]
+    prev_state_friendly_player = board_state[12]
+    prev_state_enemy_player = board_state[13]
+    curr_board = [curr_state_friendly_player[idx] - curr_state_enemy_player[idx] for idx in range(169)]
+    prev_board = [prev_state_friendly_player[idx] - prev_state_enemy_player[idx] for idx in range(169)]
 
     # Determine the outcome of the board given the next move to be made.
-    curr_state_curr_player = board_state[14]
-    curr_state_next_player = board_state[15]
-    prev_state_curr_player = board_state[12]
-    prev_state_next_player = board_state[13]
-    curr_board = [curr_state_curr_player[idx] - curr_state_next_player[idx] for idx in range(169)]
-    prev_board = [prev_state_curr_player[idx] - prev_state_next_player[idx] for idx in range(169)]
-    next_board = board_pos_after_move(curr_board, prev_board, action_idx, 1)["board_outcome"]
-    #print(next_board)
-    new_state_curr_player = [0]*169
-    new_state_next_player = [0]*169
+    move_result = board_pos_after_move(curr_board, prev_board, action_idx, 1)
+    next_board = move_result["board_outcome"]
+    legal_move = move_result["move_legal"]
+    if not legal_move:
+        print("WARNING: Illegal move made in update_board_state_for_move. Action index: ", action_idx)
+
+    # Extract the new friendly and enemy boards from the new board state.
+    new_state_friendly_player = np.zeros(169)
+    new_state_enemy_player = np.zeros(169)
     for idx in range(169):
         if next_board[idx] == 1:
-            new_state_curr_player[idx] = 1
+            new_state_friendly_player[idx] = 1
         if next_board[idx] == -1:
-            new_state_next_player[idx] = 1
+            new_state_enemy_player[idx] = 1
 
-    # Replace oldest history value by shifting down and swapping order for next player.
+    # Create a new state, from the perspective of the enemy player. Replace oldest history values, and swap order.
+    new_state = board_state.copy()
     for layer in range(2, 16, 2):
-        board_state[layer - 2] = board_state[layer + 1]
-        board_state[layer - 1] = board_state[layer]
+        new_state[layer - 2] = new_state[layer + 1]
+        new_state[layer - 1] = new_state[layer]
+    new_state[14] = new_state_enemy_player
+    new_state[15] = new_state_friendly_player
 
-    board_state[14] = new_state_next_player
-    board_state[15] = new_state_curr_player
-
-    # Swap the value in the last layer.
-    if board_state[16][0] == 1:
-        board_state[16] = [0]*169
+    # Swap the value in the last layer, to indicate the player who will move next.
+    if new_state[16][0] == 1:
+        new_state[16] = [0]*169
     else:
-        board_state[16] = [1]*169
+        new_state[16] = [1]*169
 
-    return board_state
+    # Return the new state, organized from the perspective of the "enemy" player.
+    return new_state
 
 
 def print_board(black_board, white_board):
@@ -410,6 +469,16 @@ def print_board(black_board, white_board):
             current_line = ""
 
     print("\n\n")
+
+
+def initialize_board():
+    """
+    Create an empty board state.
+    :return: an empty board, as a 17x13x13 numpy array.
+    """
+    board_state = [np.zeros((13, 13)).tolist() for _ in range(16)]  # Since no moves have been made, the board should be empty.
+    board_state.append(np.ones((13, 13)).tolist())
+    return np.reshape(board_state, (17, 13, 13))
 
 
 

@@ -1,11 +1,35 @@
-from go import *
-from neural_network_lib_layers import *
 import h5py
-import numpy as np
-import threading
-import random
+import math
 import time
 import queue
+import random
+from go import *
+import numpy as np
+import os
+#os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
+#os.environ["CUDA_VISIBLE_DEVICES"]=""
+from nn_ll_tf import *
+
+
+# Load the bash heatmap colors. We will use this to display move selection probabilities.
+with open("bash_heatmap.txt", "r") as f:
+    heatmap_colors = [c.strip() for c in f.readlines()]
+
+
+def print_heatmap(move_probs):
+    max_idx = np.argmax(move_probs)
+    heatmap_bin_size = (move_probs.max() - move_probs.min()) / (len(heatmap_colors) - 2)
+    for row in range(13):
+        row_str = ""
+        for col in range(13):
+            move_idx = 13*row + col
+            if move_idx == max_idx:
+                color_code = heatmap_colors[-1]
+            else:
+                color_code = heatmap_colors[math.ceil(move_probs[0][move_idx] / heatmap_bin_size)]
+            row_str += "\033[48;5;" + color_code + "m  \033[0m  "
+        print(row_str)
+
 
 
 # Define a global Queue
@@ -26,7 +50,7 @@ def get_input_ground_truth_pairs(game_history_file, game_number, move_number):
     # Next, get the outcome of the game.
     y_true_value = game_history_file[game_key]["outcome"][()]
     # Get the player to make the move.
-    player_to_make_move = "black" if move_number % 2 == 0 else "white"
+    player_to_make_move = "black" if move_number % 2 == 1 else "white"
     # Set y_true_value to reflect the player making the move (stored in database as outcome relative to black player).
     if player_to_make_move is "white":
         y_true_value *= -1
@@ -68,6 +92,23 @@ def get_input_ground_truth_pairs(game_history_file, game_number, move_number):
     friendly_value = 1 if player_to_make_move is "black" else 2
     current_board = game_history_file[game_key]["move_history"][move_number-1, 0:169]
     friendly, enemy = get_liberty_counts_from_board(current_board, friendly_value)
+
+    """
+    print("\nFriendly Lib Count Board: \n")
+    for r in range(13):
+        r_str = ""
+        for c in range(13):
+            r_str += str(friendly[r*13 + c]) + " "
+        print(r_str)
+
+    print("\nEnemy Lib Count Board: \n")
+    for r in range(13):
+        r_str = ""
+        for c in range(13):
+            r_str += str(enemy[r * 13 + c]) + " "
+        print(r_str)
+    """
+
     board_state.append(friendly)
     board_state.append(enemy)
 
@@ -110,7 +151,7 @@ def get_random_game_move_data():
             # From that game, randomly select a move.
             game_key = "game_" + str(random_game)
             game_group = int((random_game + 1) / 1000)
-            game_history_file = h5py.File("downloaded_game_data_new/downloaded_game_data_" + str(game_group) + ".h5", "r")
+            game_history_file = h5py.File("downloaded_game_data/downloaded_game_data_" + str(game_group) + ".h5", "r")
             num_moves = game_history_file[game_key]["move_history"].shape[0]
             if num_moves < 50:
                 continue
@@ -142,7 +183,7 @@ def get_random_game_move_data():
 
     #reshaped_inputs = np.array([np.reshape(np.array(x), (13,13)) for x in training_data["inputs"][0]])
     width_height_depth = [[training_data["inputs"][0][j][i] for j in range(19)] for i in range(169)]
-    reshaped_inputs = np.reshape(np.array(width_height_depth), (1, 13, 13, 19))
+    reshaped_inputs = np.reshape(np.array(width_height_depth), (1, 19, 13, 13))
     #print(reshaped_inputs.shape)
     reshaped_gt_values = np.reshape(np.array(training_data["y_true_values"]), (1, 1))
     reshaped_gt_policies = np.reshape(np.array(training_data["y_true_policies"]), (1, 170))
@@ -159,43 +200,50 @@ def get_random_game_move_data():
     return {"inputs": reshaped_inputs, "gt_values": reshaped_gt_values, "gt_policies": reshaped_gt_policies}
 
 
-def data_prep_thread(thread_num):
-    while True:
-        training_data = get_random_game_move_data()
-        training_batches.put(training_data)
 
 def prediction_loop(player_nn):
     while True:
-        training_data = training_batches.get()
+        training_data = get_random_game_move_data()
         if training_data:
             inputs = training_data["inputs"]
             gt_values = training_data["gt_values"]
             gt_policies = training_data["gt_policies"]
-            prior_probs, pred_value = player_nn.predict_given_state(inputs)
-            action_idx = np.argmax(prior_probs)
-            print("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
-            print("\nCurrent board state:\n\n")
             board_state_old = []
             for i in range(19):
                 board_state_old.append(np.reshape(inputs, (169, 19))[...,i])
-            print_board(board_state_old[14], board_state_old[15])
-            print("\n\nBoard after move at row ", action_idx//13, " column ",action_idx%13,":")
+            player_to_move = "White" if board_state_old[16][0] == 0 else "Black"
+            legal_moves = get_all_legal_moves_from_board_state(board_state_old[:17])
+            legal_moves.append(1)
+            legal_moves = np.asarray([legal_moves])
+            prior_probs, pred_value = player_nn.predict_given_state(inputs)
+            best_legal_moves = legal_moves*prior_probs
+            action_idx = np.argmax(best_legal_moves)
+            print("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
+            print("Player to Move: ", player_to_move)
+            print("\nMove Probability Heat Map")
+            print_heatmap(best_legal_moves)
+            print("\nWin Likelihood: ", pred_value, " vs. Actual Result: ", gt_values)
+            print("\nCurrent board state:")
+            black_board = board_state_old[14] if player_to_move == "Black" else board_state_old[15]
+            white_board = board_state_old[14] if player_to_move == "White" else board_state_old[15]
+            print_board(black_board, white_board)
+            print("\nBoard after move at row ", action_idx//13, " column ", action_idx % 13, ":")
             board_state = update_board_state_for_move(action_idx, board_state_old[:17])
-            print_board(board_state[15], board_state[14])
-            print("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
+            black_board = board_state[15] if player_to_move == "Black" else board_state[14]
+            white_board = board_state[15] if player_to_move == "White" else board_state[14]
+            print_board(black_board, white_board)
+            print("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
+            input()
 
 
 def main():
     # Create the player.
-    player_nn = PolicyValueNetwork(0.0001, starting_network_file="young_goon_acc26.h5")
+    #player_nn = PolicyValueNetwork(0.0001, starting_network_file="young_ryzen_ckpt_30500.h5")
+    player_nn = PolicyValueNetwork(0.0001, starting_network_file="young_thread_ripper_ckpt_11500.h5")
 
-    # Create and run a handful of data prep threads.
-    for x in range(1):
-        dp_thread = threading.Thread(target=data_prep_thread, args=(x,))
-        dp_thread.start()
-
-    # Run the optimzation loop on this thread.
+    # Run the prediction loop.
     prediction_loop(player_nn)
+
 
 # Run the main function.
 main()

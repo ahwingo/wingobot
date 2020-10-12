@@ -1,6 +1,7 @@
 import numpy as np
 import h5py
 from go import *
+import os
 
 
 """
@@ -15,6 +16,21 @@ move_code_map = {"a": 0, "b": 1, "c": 2, "d": 3, "e": 4, "f": 5, "g": 6,
                  "h": 7, "i": 8, "j": 9, "k": 10, "l": 11, "m": 12}
 
 
+def get_files_from_dir(data_dir, ext="sgf"):
+    """
+    Recursively get a list of all the files from the given directory with the given extension.
+    :param data_dir:
+    :param ext:
+    :return:
+    """
+    file_paths = []
+    for current_path, sub_dirs, files in os.walk(data_dir):
+        file_paths.extend([os.path.join(current_path, f) for f in files if f.endswith(ext)])
+        for sub_dir in sub_dirs:
+            file_paths.extend(get_files_from_dir(sub_dir))
+    return file_paths
+
+
 def save_game_data(game_num, game_outcome, move_history, h5_file):
     """
     This function saves a games history of moves and its outcome into an HDF5 file.
@@ -25,7 +41,7 @@ def save_game_data(game_num, game_outcome, move_history, h5_file):
     """
     # Next, create a group for this game.
     game_group = h5_file.create_group("game_" + str(game_num))
-    # Create a data set for the games outcome.
+    # Create a data set for the games move history.
     game_group.create_dataset("move_history", move_history.shape, dtype=move_history.dtype, data=move_history)
     # Create a data set for the winner of the game.
     game_group.create_dataset("outcome", game_outcome.shape, dtype=game_outcome.dtype, data=game_outcome)
@@ -44,10 +60,8 @@ def load_downloaded_games():
     num_thousands = 0
     game_history_file = h5py.File("downloaded_game_data_" + str(num_thousands) + ".h5", 'w')
 
-    # Open the file that contains all the paths to downloaded sgf files.
-    with open("Go_Games_13x13/files.txt", "r") as f:
-        file_paths = f.readlines()
-    print(len(file_paths))
+    # Load the paths to each game file.
+    file_paths = get_files_from_dir("Go_Games_13x13")
 
     # Open each SGF file and read the moves. Store moves and outcomes into an HDF5 file.
     game_number = 0
@@ -82,8 +96,8 @@ def load_downloaded_games():
             # Initialize the state of the empty board from blacks perspective.
             board_state = []
             for _ in range(16):
-                board_state.append([0]*169)
-            board_state.append([1]*169)
+                board_state.append(np.zeros(169).tolist())
+            board_state.append(np.ones(169).tolist())
 
             # Maintain a history of moves and resulting board states.
             move_history = []
@@ -96,9 +110,9 @@ def load_downloaded_games():
 
                 # Store the state and action.
                 current_board_and_chosen_action = get_single_storable_board_from_state(board_state[14], board_state[15])
-                current_board_and_chosen_action.append(1)
-                current_board_and_chosen_action.append(action_idx)
-                move_history.append(current_board_and_chosen_action)
+                current_board_and_chosen_action.append(1)  # Indicate that the last move was by black.
+                current_board_and_chosen_action.append(action_idx)  # Add the move index to this list.
+                move_history.append(current_board_and_chosen_action)  # Add this strange data type to the move history list... Why not just use a dictionary?
 
                 # If the selected move is a pass, increment the number of consecutive passes.
                 if action_idx == 169:
@@ -120,9 +134,9 @@ def load_downloaded_games():
 
                 # Store the state and action.
                 current_board_and_chosen_action = get_single_storable_board_from_state(board_state[15], board_state[14])
-                current_board_and_chosen_action.append(2)
-                current_board_and_chosen_action.append(action_idx)
-                move_history.append(current_board_and_chosen_action)
+                current_board_and_chosen_action.append(2)  # Indicate that the last move was by white.
+                current_board_and_chosen_action.append(action_idx)  # Add the move index.
+                move_history.append(current_board_and_chosen_action)  # Again, why not just use a dictionary?
 
                 # If the selected move is a pass, increment the number of consecutive passes.
                 if action_idx == 169:
@@ -143,7 +157,7 @@ def load_downloaded_games():
             if (game_number + 1) % 1000 is 0:
                 num_thousands = int((game_number+1) / 1000)
                 game_history_file.close()
-                game_history_file = h5py.File("downloaded_game_data_new/downloaded_game_data_" + str(num_thousands) + ".h5", 'w')
+                game_history_file = h5py.File("downloaded_game_data/downloaded_game_data_" + str(num_thousands) + ".h5", 'w')
             save_game_data(game_number, game_outcome, move_history, game_history_file)
 
             # Increment the number of games.
@@ -151,7 +165,8 @@ def load_downloaded_games():
             if game_number % 100 is 0:
                 print("Done with game number " + str(game_number))
 
-        except:
+        except Exception as e:
+            print("Running into error: ", e)
             continue
 
 

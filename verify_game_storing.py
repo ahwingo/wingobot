@@ -1,6 +1,7 @@
 import numpy as np
 import h5py
 from go import *
+import os
 
 
 """
@@ -15,6 +16,21 @@ move_code_map = {"a": 0, "b": 1, "c": 2, "d": 3, "e": 4, "f": 5, "g": 6,
                  "h": 7, "i": 8, "j": 9, "k": 10, "l": 11, "m": 12}
 
 
+def get_files_from_dir(data_dir, ext="sgf"):
+    """
+    Recursively get a list of all the files from the given directory with the given extension.
+    :param data_dir:
+    :param ext:
+    :return:
+    """
+    file_paths = []
+    for current_path, sub_dirs, files in os.walk(data_dir):
+        file_paths.extend([os.path.join(current_path, f) for f in files if f.endswith(ext)])
+        for sub_dir in sub_dirs:
+            file_paths.extend(get_files_from_dir(sub_dir))
+    return file_paths
+
+
 def get_index_for_move_code(move_code):
     global move_code_map
     move_row = move_code_map[move_code[0]]
@@ -27,10 +43,8 @@ def load_downloaded_games():
     # Open the H5 file that will be used.
     game_history_file = h5py.File("downloaded_game_data.h5", 'w')
 
-    # Open the file that contains all the paths to downloaded sgf files.
-    with open("Go_Games_13x13/files.txt", "r") as f:
-        file_paths = f.readlines()
-    print(len(file_paths))
+    # Get the paths to all of the sgf files.
+    file_paths = get_files_from_dir("Go_Games_13x13")
 
     # Open each SGF file and read the moves. Store moves and outcomes into an HDF5 file.
     game_number = 0
@@ -116,7 +130,6 @@ def load_downloaded_games():
             print_board(board_state[15], board_state[14])
 
             input()
-
 
             # Increment the number of games.
             game_number += 1

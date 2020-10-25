@@ -7,6 +7,7 @@ Written By Houston Wingo, Sept 26, 2020
 import go
 import os
 import queue
+import yappi
 import argparse
 import threading
 from nn_ll_tf import *
@@ -74,7 +75,7 @@ class SelfPlayGame(threading.Thread):
             print("WARNING: Game outcome cannot be saved yet. The game is still in progress.")
 
         # If the game has completed, convert the list of moves and game outcome to SGF format.
-        print("TODO: You need to finish writing this.")
+        go.save_game_to_sgf(self.moves, self.game_outcome, self.output_filename)
 
     def convert_game_result_to_hdf5_format(self):
         """
@@ -94,9 +95,9 @@ class SelfPlayGame(threading.Thread):
         komi_adjusted_score = tromp_taylor_result - 7.5
         # Create a string to represent the result.
         if komi_adjusted_score < 0:
-            score = "W+" + str(komi_adjusted_score)
+            score = "W+" + str(-komi_adjusted_score)
         else:
-            score = "B+"  + str(komi_adjusted_score)
+            score = "B+" + str(komi_adjusted_score)
         # Return the score as a string.
         return score
 
@@ -104,7 +105,7 @@ class SelfPlayGame(threading.Thread):
         """ Run an instance of self play on its own thread. This overwrites the superclass run function. """
         self.play_game()
         self.save_game_results_sgf()
-        self.convert_game_result_to_hdf5_format()
+        #self.convert_game_result_to_hdf5_format()
 
 
 class ProcessingQueue(threading.Thread):
@@ -164,10 +165,11 @@ def main():
     """ Run self play on a bunch of threads using this main function. """
     # Parse the input arguments.
     parser = argparse.ArgumentParser()
-    parser.add_argument("--game_threads", default=32, type=int)
-    parser.add_argument("--game_duration", default=10, type=int)
+    parser.add_argument("--game_threads", default=1, type=int)
+    parser.add_argument("--game_duration", default=100, type=int)
     parser.add_argument("--num_simulations", default=10, type=int)
-    parser.add_argument("--go_bot", default="young_thread_ripper_ckpt_11500.h5")
+    #parser.add_argument("--go_bot", default="young_thread_ripper_ckpt_11500.h5")
+    parser.add_argument("--go_bot", default="young_taichi_ckpt_10000.h5")
     args = parser.parse_args()
     num_game_threads = args.game_threads
     game_duration = args.game_duration
@@ -204,6 +206,17 @@ def main():
     processing_queue.shutdown()
     processing_queue.join()
 
+
 # Run the main function.
 if __name__ == "__main__":
+    #yappi.start()
     main()
+    """
+    yappi.stop()
+    threads = yappi.get_thread_stats()
+    for thread in threads:
+        print(
+            "Function stats for (%s) (%d)" % (thread.name, thread.id)
+        )  # it is the Thread.__class__.__name__
+        yappi.get_func_stats(ctx_id=thread.id).print_all()
+    """

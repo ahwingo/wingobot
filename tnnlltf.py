@@ -5,6 +5,9 @@ import numpy as np
 import random
 import time
 import queue
+import os
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 # Use the following number of examples per training instance.
 total_examples = 2048
@@ -14,7 +17,7 @@ total_examples = 2048
 training_batches = queue.Queue()
 
 
-def get_input_ground_truth_pairs(game_history_file, game_number, move_number):
+def get_input_ground_truth_pairs(game_history_file, game_number, move_number, ignore_values=None):
     """
     :param game_history_file:
     :param game_number:
@@ -25,8 +28,14 @@ def get_input_ground_truth_pairs(game_history_file, game_number, move_number):
     # Then, get the keys to access the game.
     game_key = "game_" + str(game_number)
 
-    # Next, get the outcome of the game.
+    # Next, get the move selected at this state and the outcome of the game.
+    mcts_selected_move = int(game_history_file[game_key]["move_history"][move_number - 1, -1])
     y_true_value = game_history_file[game_key]["outcome"][()]
+
+    # Check if these indices should be ignored.
+    if ignore_values and ignore_values(mcts_selected_move):
+        return None, None, None
+
     # Get the player to make the move.
     player_to_make_move = "black" if move_number % 2 == 1 else "white"
     # Set y_true_value to reflect the player making the move (stored in database as outcome relative to black player).
@@ -54,7 +63,7 @@ def get_input_ground_truth_pairs(game_history_file, game_number, move_number):
     board_state.append(enemy)
 
     y_true_policy = np.zeros(170).tolist()
-    mcts_selected_move = int(game_history_file[game_key]["move_history"][move_number - 1, -1])
+    #mcts_selected_move = int(game_history_file[game_key]["move_history"][move_number - 1, -1])
     y_true_policy[mcts_selected_move] = 1
 
     return board_state, y_true_value, y_true_policy
@@ -89,17 +98,25 @@ def get_total_examples_training_batch():
             move_range_low = 1
 
             # Train on the first X moves only.
-            first_x_moves = 75 # Consider only opening moves.
+            first_x_moves = 120 # Consider most moves.
             total_moves = game_history_file[game_key]["move_history"].shape[0] - 1
             move_range_high = min(total_moves, first_x_moves)
             random_move = random.randint(move_range_low, move_range_high)
 
-            # Add to the training data.
+            # Ignore any moves on the dying line.
+            on_dying_line = lambda idx : idx // 13 == 0 or idx % 13 == 12 or idx < 13 or idx > 155
+
+            # Get the state, selected move, and outcome from the game file.
             input_state, output_value, output_policy = get_input_ground_truth_pairs(game_history_file,
                                                                                     random_game,
-                                                                                    random_move)
+                                                                                    random_move,
+                                                                                    ignore_values=on_dying_line)
             # Close the game history file.
             game_history_file.close()
+
+            # Discard this move if it falls on the dying line...
+            if not output_value:
+                continue
 
             training_data["inputs"].append(input_state)
             training_data["y_true_values"].append(output_value)
@@ -125,7 +142,7 @@ def data_prep_thread(thread_num):
 
 
 def optimization_loop(player_nn, model_name):
-    mini_batch_num = 10500
+    mini_batch_num = 0
     while True:
         training_data = get_total_examples_training_batch()
         if training_data:
@@ -145,10 +162,11 @@ def optimization_loop(player_nn, model_name):
 def main():
     # Create the player.
     #model_name = "young_ryzen"  # These models were trained with bad shapes (13, 13, 19) as opposed to (19, 13, 13)
-    model_name = "young_thread_ripper"
-    player_nn = PolicyValueNetwork(0.0001, starting_network_file="young_thread_ripper_ckpt_10500.h5", train_supervised=True)
-    #player_nn = PolicyValueNetwork(0.0001, train_supervised=True)
-    #player_nn.save_model_to_file(model_name + ".h5")
+    #model_name = "young_thread_ripper"  # These models were trained with moves played on the dying line.
+    model_name = "young_taichi"
+    #player_nn = PolicyValueNetwork(0.0001, starting_network_file="young_thread_ripper_ckpt_10500.h5", train_supervised=True)
+    player_nn = PolicyValueNetwork(0.0001, train_supervised=True)
+    player_nn.save_model_to_file(model_name + ".h5")
 
     # Run the optimization loop on this thread.
     optimization_loop(player_nn, model_name)

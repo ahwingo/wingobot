@@ -44,18 +44,37 @@ class MCTSNode:
         """
         exponentiated_visits = [vis_cnt ** (1.0 / temperature) for vis_cnt in self.visit_count]
         total_exponentiated_visits = sum(exponentiated_visits)
-        dirchlect_noise_coeff = 3.0 * sum(self.visit_count) / 100.0  # 3% of the total exponentiated visit count.
-        dirichlet_probs = np.random.dirichlet([dirchlect_noise_coeff]*170)
+        #dirchlect_noise_coeff = 3.0 * sum(self.visit_count) / 100.0  # 3% of the total exponentiated visit count.
+        dirchlect_noise_coeff = 3  # Just the number 3...
+        dirichlet_probs = np.random.dirichlet([dirchlect_noise_coeff]*170)*10
         max_idx = 169
         max_value = (dirichlet_probs[max_idx] + exponentiated_visits[max_idx]) / total_exponentiated_visits
+
+        # Use this to fib some numbers (prevent playing on the losing and dying lines so much).
+        ld_prevent = np.zeros((13, 13))
+        ld_prevent[0] -= np.ones(13)*0.05
+        ld_prevent[:, 0] -= np.ones(13)*0.05
+        ld_prevent[12] -= np.ones(13)*0.05
+        ld_prevent[:, 12] -= np.ones(13)*0.05
+        ld_prevent = np.reshape(ld_prevent, 169).tolist()
+        ld_prevent.append(-0.5)
+
+        probs = (dirichlet_probs + exponentiated_visits + ld_prevent) / total_exponentiated_visits
+        best_option = np.argmax(probs)
+        return best_option
+
+
+
+        """
         for idx in range(170):
             if idx not in self.children:
                 continue
-            curr_value = (dirichlet_probs[idx] + exponentiated_visits[idx]) / total_exponentiated_visits
+            curr_value = (dirichlet_probs[idx] + exponentiated_visits[idx] + ld_prevent[idx]) / total_exponentiated_visits
             if curr_value >= max_value:
                 max_value = curr_value
                 max_idx = idx
         return max_idx
+        """
 
     def back_propagate(self, sim_result):
         """
@@ -150,7 +169,7 @@ class MCTSNode:
         return legal_moves
 
     def apply_dirichlet_noise(self, prior_probs):
-        dirichlet_probs = np.random.dirichlet([0.03]*170)
+        dirichlet_probs = np.random.dirichlet([3]*170)
         new_prior_probs = [0.75*prior_probs[idx] + 0.25*dirichlet_probs[idx] for idx in range(170)]
         return new_prior_probs
 
@@ -166,7 +185,7 @@ class MCTSNode:
         if self.parent is None:
             adjusted_prior_probs = self.apply_dirichlet_noise(self.prior_probs)
         max_action = 169
-        total_visits = sum(self.visit_count)
+        total_visits = sum(self.visit_count) + 1  # Make this plus one, so the first move is not always the final idx.
         max_value = self.legal_actions[max_action] * (self.mean_action_value[max_action] + PUCT_CONST * adjusted_prior_probs[max_action] * math.sqrt(total_visits) / (1.0 + self.visit_count[max_action]))
         for idx in range(169):
             if self.legal_actions[idx] != 1:
@@ -187,6 +206,8 @@ class MCTSNode:
             self.children[max_action] = child_node
 
         # Return the child node identified by the move with the best PUCT value.
+        mod13 = max_action % 13
+        div13 = max_action // 13
         return self.children[max_action]
 
     def send_parent_to_nursing_home(self):

@@ -480,8 +480,38 @@ def initialize_board():
     board_state.append(np.ones((13, 13)).tolist())
     return np.reshape(board_state, (17, 13, 13))
 
+def save_game_to_sgf(moves_list, game_result, outfile):
+    """
 
-
-
-
-
+    :param moves_list:
+    :param game_result:
+    :param outfile:
+    :return:
+    """
+    # Get the index given the alphabet values of the move.
+    move_code_map = {0: "a", 1: "b", 2: "c", 3: "d", 4: "e", 5: "f", 6: "g",
+                     7: "h", 8: "i", 9: "j", 10: "k", 11: "l", 12: "m"}
+    # Add the header.
+    lines = ["(;GM[1]FF[4]CA[UTF-8]", "RU[Chinese]SZ[13]KM[7.5]TM[600]",
+             "PW[wingobot]PB[wingobot]WR[00]BR[00]DT[2020-07-30]PC[wingo-desktop]" + "RE[" + game_result + "]GN[007]"]
+    # For every move, starting with black, add it to the list of lines.
+    player = "B"  # Alternates between B and W.
+    for move in moves_list:
+        if move == 169:
+            move_code = ""  # For a pass.
+        else:
+            row = move // 13
+            col = move % 13
+            move_code = move_code_map[row] + move_code_map[col]
+        move_str = ";" + player + "[" + move_code + "]"
+        lines.append(move_str)
+        if player == "B":
+            player = "W"
+        else:
+            player = "B"
+    # Add a closing paren.
+    lines.append(")")
+    # Write every line to the file.
+    with open(outfile, "w") as f:
+        for line in lines:
+            f.write(line)

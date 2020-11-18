@@ -4,18 +4,18 @@ This script trains a WinGoBot through self play. It saves self play games out to
 Written By Houston Wingo, Sept 26, 2020
 
 Version Notes:
-This version of self play is the least efficient (of the updated functional versions). It does not make use of
-memoization and only uses multithreading, not multi processing.
+This version of self play is moderately efficient. It makes use of memoization but only uses multi threading,
+not multi processing.
 """
 
-import go
 import os
 import queue
 import yappi
 import argparse
 import threading
 from nn_ll_tf import *
-from mcts_lib_layers import MonteCarloSearchTree
+from gooop import Goban
+from mcts_gooop import MonteCarloSearchTree
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
 
@@ -47,7 +47,7 @@ class SelfPlayGame(threading.Thread):
         self.num_simulations = num_simulations
 
         # Initialize an empty board.
-        self.board_state = go.initialize_board()
+        self.board_state = Goban(13)
 
         # Create an instance of the MCST for this game, from the perspective of the black and white players.
         self.black_search_tree = MonteCarloSearchTree(self.game_id, self.black_processing_queue, self.board_state)
@@ -97,7 +97,7 @@ class SelfPlayGame(threading.Thread):
             print("WARNING: Game outcome cannot be saved yet. The game is still in progress.")
 
         # If the game has completed, convert the list of moves and game outcome to SGF format.
-        go.save_game_to_sgf(self.moves, self.game_outcome, self.output_filename)
+        self.board_state.save_game_to_sgf(self.output_filename)
 
     def convert_game_result_to_hdf5_format(self):
         """
@@ -109,19 +109,9 @@ class SelfPlayGame(threading.Thread):
 
     def calculate_game_outcome(self):
         """ Calculate the outcome of the game, using Tromp Taylor scoring. """
-        # Get the single final board from blacks perspective (B = 1, W = -1).
-        final_board = self.board_state[14] - self.board_state[15]
         # Calculate the Tromp Taylor score.
-        tromp_taylor_result = go.tromp_taylor_score(final_board)
-        # Adjust for komi.
-        komi_adjusted_score = tromp_taylor_result - 7.5
-        # Create a string to represent the result.
-        if komi_adjusted_score < 0:
-            score = "W+" + str(-komi_adjusted_score)
-        else:
-            score = "B+" + str(komi_adjusted_score)
-        # Return the score as a string.
-        return score
+        tromp_taylor_result = self.board_state.tromp_taylor_score()
+        return tromp_taylor_result
 
     def run(self):
         """ Run an instance of self play on its own thread. This overwrites the superclass run function. """

@@ -1,13 +1,11 @@
 from go import *
 from nn_ll_tf import *
 import h5py
+import threading
 import numpy as np
 import random
 import time
 import queue
-import os
-#os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-#os.environ["CUDA_VISIBLE_DEVICES"] = "0, 1"
 
 # Use the following number of examples per training instance.
 total_examples = 2048
@@ -16,8 +14,7 @@ total_examples = 2048
 # Define a global Queue
 training_batches = queue.Queue()
 
-
-def get_input_ground_truth_pairs(game_history_file, game_number, move_number, ignore_values=None):
+def get_input_ground_truth_pairs(game_history_file, game_number, move_number):
     """
     :param game_history_file:
     :param game_number:
@@ -28,16 +25,10 @@ def get_input_ground_truth_pairs(game_history_file, game_number, move_number, ig
     # Then, get the keys to access the game.
     game_key = "game_" + str(game_number)
 
-    # Next, get the move selected at this state and the outcome of the game.
-    mcts_selected_move = int(game_history_file[game_key]["move_history"][move_number - 1, -1])
+    # Next, get the outcome of the game.
     y_true_value = game_history_file[game_key]["outcome"][()]
-
-    # Check if these indices should be ignored.
-    if ignore_values and ignore_values(mcts_selected_move):
-        return None, None, None
-
     # Get the player to make the move.
-    player_to_make_move = "black" if move_number % 2 == 1 else "white"
+    player_to_make_move = "black" if move_number % 2 == 0 else "white"
     # Set y_true_value to reflect the player making the move (stored in database as outcome relative to black player).
     if player_to_make_move is "white":
         y_true_value *= -1
@@ -63,20 +54,19 @@ def get_input_ground_truth_pairs(game_history_file, game_number, move_number, ig
     board_state.append(enemy)
 
     y_true_policy = np.zeros(170).tolist()
-    #mcts_selected_move = int(game_history_file[game_key]["move_history"][move_number - 1, -1])
+    mcts_selected_move = int(game_history_file[game_key]["move_history"][move_number - 1, -1])
     y_true_policy[mcts_selected_move] = 1
-
-    board_state, y_true_policy = transform_board_and_policy(np.asarray(board_state).reshape((19, 13, 13)), y_true_policy)
-    board_state = board_state.tolist()
 
     return board_state, y_true_value, y_true_policy
 
 
-def get_total_examples_training_batch():
+def get_total_examples_training_batch(num_calls):
     """
     This function trains the neural network, using the move histories and game outcomes in the game history file.
     When training on 64 GPUs, each GPU used a minibatch size of 32, for a total minibatch size of total_examples.
     Here, we will just use a minibatch size of 32.
+    :param player_nn: a PolicyValueNetwork to train.
+    :param mini_batch_num: an integer that shows which minibatch this is.
     """
     # Next, randomly select moves to train on.
     training_data = {"inputs": [], "y_true_values": [], "y_true_policies": []}
@@ -100,26 +90,19 @@ def get_total_examples_training_batch():
                 continue
             move_range_low = 1
 
-            # Train on the first X moves only.
-            first_x_moves = 120 # Consider most moves.
+            # Train on the first 50 moves only.
+            first_x_moves = 50  # Consider only opening moves.
+            #first_x_moves = min(8 + num_calls // 50, 100)
             total_moves = game_history_file[game_key]["move_history"].shape[0] - 1
             move_range_high = min(total_moves, first_x_moves)
             random_move = random.randint(move_range_low, move_range_high)
 
-            # Ignore any moves on the dying line.
-            on_dying_line = lambda idx : idx // 13 == 0 or idx % 13 == 12 or idx < 13 or idx > 155
-
-            # Get the state, selected move, and outcome from the game file.
+            # Add to the training data.
             input_state, output_value, output_policy = get_input_ground_truth_pairs(game_history_file,
                                                                                     random_game,
-                                                                                    random_move,
-                                                                                    ignore_values=on_dying_line)
+                                                                                    random_move)
             # Close the game history file.
             game_history_file.close()
-
-            # Discard this move if it falls on the dying line...
-            if not output_value:
-                continue
 
             training_data["inputs"].append(input_state)
             training_data["y_true_values"].append(output_value)
@@ -131,7 +114,8 @@ def get_total_examples_training_batch():
             print("failing to access game " + str(random_game))
             continue
 
-    reshaped_inputs = np.reshape(np.array(training_data["inputs"]), (total_examples, 19, 13, 13))  # This used to be 13, 13, 19
+    #width_height_depth = [[[training_data["inputs"][k][j][i] for j in range(19)] for i in range(169)] for k in range(total_examples)]
+    reshaped_inputs = np.reshape(np.array(training_data["inputs"]), (total_examples, 13, 13, 19))
     reshaped_gt_values = np.reshape(np.array(training_data["y_true_values"]), (total_examples, 1))
     reshaped_gt_policies = np.reshape(np.array(training_data["y_true_policies"]), (total_examples, 170))
 
@@ -139,21 +123,27 @@ def get_total_examples_training_batch():
 
 
 def data_prep_thread(thread_num):
+    num_calls = 0
     while True:
-        training_data = get_total_examples_training_batch()
+        num_calls += 1
+        training_data = get_total_examples_training_batch(num_calls)
         training_batches.put(training_data)
 
 
-def optimization_loop(player_nn, model_name):
+def optimization_loop():
+    global training_batches
     mini_batch_num = 0
+    model_name = "young_ryzen"
+    player_nn = PolicyValueNetwork(0.0001, train_supervised=True)
     while True:
-        training_data = get_total_examples_training_batch()
+        training_data = training_batches.get()
+        num_calls += 1
         if training_data:
             print("Training on mini batch ", mini_batch_num)
             inputs = training_data["inputs"]
             gt_values = training_data["gt_values"]
             gt_policies = training_data["gt_policies"]
-            player_nn.train_supervised(inputs, gt_values, gt_policies)
+            player_nn.train_supervised(inputs, gt_values, gt_policies, "young_ryzen.h5")
             mini_batch_num += 1
 
             # Save a checkpoint every 500 mini batches.
@@ -163,17 +153,13 @@ def optimization_loop(player_nn, model_name):
 
 
 def main():
-    # Create the player.
-    #model_name = "young_ryzen"  # These models were trained with bad shapes (13, 13, 19) as opposed to (19, 13, 13)
-    #model_name = "young_thread_ripper"  # These models were trained with moves played on the dying line.
-    #model_name = "young_taichi"  # These models were trained without any dying line moves.
-    model_name = "young_dark_rock"  # These models were trained with board rotations and flips.
-    #player_nn = PolicyValueNetwork(0.0001, starting_network_file="young_thread_ripper_ckpt_10500.h5", train_supervised=True)
-    player_nn = PolicyValueNetwork(0.0001, train_supervised=True)
-    player_nn.save_model_to_file(model_name + ".h5")
 
-    # Run the optimization loop on this thread.
-    optimization_loop(player_nn, model_name)
+    # Create the model training thread.
+    training_thread = threading.Thread(target=optimization_loop)
+    training_thread.start()
+
+    # Start building the training data.
+    data_prep_thread(0)
 
 # Run the main function.
 main()

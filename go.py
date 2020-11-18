@@ -1,5 +1,5 @@
 import numpy as np
-
+import random
 
 def tromp_taylor_score(board):
     """
@@ -515,3 +515,30 @@ def save_game_to_sgf(moves_list, game_result, outfile):
     with open(outfile, "w") as f:
         for line in lines:
             f.write(line)
+
+
+def transform_board_and_policy(board, policy):
+    """
+    Rotate and flip randomly.
+    :param board: a Nx13x13 numpy array
+    :param policy: a 170 element list (1 for selected move, 0 for the rest)
+    :return:
+    """
+    num_rotations = random.choice([0, 1, 2, 3])
+    flip = random.choice([True, False])
+    new_board = np.rot90(board, num_rotations, axes=(1, 2))
+    new_policy = np.asarray(policy[:-1]).reshape((13, 13))
+    new_policy = np.rot90(new_policy, num_rotations)
+    if flip:
+        new_board = np.flip(new_board, axis=2)
+        new_policy = np.flip(new_policy, axis=1)
+    if policy[-1] == 1:
+        new_policy = policy
+    else:
+        new_policy = np.reshape(new_policy, 169).tolist()
+        new_policy.append(0)
+    return new_board, new_policy
+
+
+
+

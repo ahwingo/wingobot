@@ -195,6 +195,10 @@ class ProcessingQueue(Thread):
                 if incoming_request == "SHUTDOWN":
                     print("Processing Queue received the shutdown message. Exiting.")
                     return
+                # If the message is a training request, start training.
+                elif incoming_request == "TRAIN":
+                    self.__train()
+                    continue
                 states.append(incoming_request["state"])
                 response_queues.append(incoming_request["response_queue_id"])
             # Convert the newly collected list of states into a numpy batch.
@@ -218,6 +222,23 @@ class ProcessingQueue(Thread):
     def shutdown(self):
         """ When the main script quits, shut down the processing queue."""
         self.input_queue.put("SHUTDOWN")
+
+    def send_train_signal(self):
+        """ Tell the go bot to start training. """
+        self.input_queue.put("TRAIN")
+
+    def __train(self):
+        """ 
+        Train the go bot held by this processing queue.
+        This is honestly probably not the cleanest way to start training.
+        However, I am very tired at the moment and can't think of anything better... Its 11:21 PM on a Sunday night...
+        Its 11:26. Self confidence is kicking in. Maybe this is bad coupling but I think training this way (ie
+        from the processing loop) is a good way to not interfere with all of the other processes. And the PV network
+        object is what will actually run the training anyways. This function should really just pass in a few things,
+        like which h5 files to process, the batch size, and the total number of batches to use.
+        """
+
+
 
 
 def write_batch_results_to_h5(filename, results_queue):
@@ -253,28 +274,30 @@ def main():
     parser.add_argument("--game_threads", default=128, type=int)
     parser.add_argument("--game_duration", default=125, type=int)
     parser.add_argument("--num_simulations", default=5, type=int)
-    parser.add_argument("--black_go_bot", default="young_dark_rock/young_dark_rock_ckpt_11500.h5")
-    parser.add_argument("--white_go_bot", default="young_dark_rock/young_dark_rock_ckpt_12000.h5")
+    parser.add_argument("--batches_per_training_cycle", default=8, type=int)
+    parser.add_argument("--go_bot_1", default="young_dark_rock/young_dark_rock_ckpt_11500.h5")
+    parser.add_argument("--go_bot_2", default="young_dark_rock/young_dark_rock_ckpt_12000.h5")
     parser.add_argument("--game_output_dir", default="self_play_games/h5_games")
     args = parser.parse_args()
     num_game_threads = args.game_threads
     game_duration = args.game_duration
     num_simulations = args.num_simulations
-    black_go_bot_file = args.black_go_bot
-    white_go_bot_file = args.white_go_bot
+    batches_per_training_cycle = args.batches_per_training_cycle
+    go_bot_1_file = args.go_bot_1
+    go_bot_2_file = args.go_bot_2
     output_dir = args.game_output_dir
 
     # Create the multiprocess queues that will store board states (NN inputs) and game results (nparrays for h5 files).
     queue_manager = mp.Manager()
-    black_input_queue = queue_manager.Queue()
-    white_input_queue = queue_manager.Queue()
+    bot_1_input_queue = queue_manager.Queue()
+    bot_2_input_queue = queue_manager.Queue()
     game_results_queue = queue_manager.Queue()
 
     # Create and start the black and white player processing queues.
-    black_processing_queue = ProcessingQueue(black_go_bot_file, num_game_threads, black_input_queue)
-    black_processing_queue.start()
-    white_processing_queue = ProcessingQueue(white_go_bot_file, num_game_threads, white_input_queue)
-    white_processing_queue.start()
+    bot_1_processing_queue = ProcessingQueue(go_bot_2_file, num_game_threads, bot_1_input_queue)
+    bot_1_processing_queue.start()
+    bot_2_processing_queue = ProcessingQueue(go_bot_1_file, num_game_threads, bot_2_input_queue)
+    bot_2_processing_queue.start()
 
     # Get the game id offset. TODO make this relative to the number of games historically played.
     game_batch_files = [int(f.split("_")[1].split(".h5")[0]) for f in os.listdir(output_dir) if f.endswith("h5")]
@@ -289,26 +312,30 @@ def main():
         start_time = time()
 
         # Spin up games on their own threads.
-        black_output_queue_map = {}
-        white_output_queue_map = {}
+        bot_1_output_queue_map = {}
+        bot_2_output_queue_map = {}
         game_threads = []
         for game_num in range(num_game_threads):
             game_id = game_id_offset + game_num
-            black_output_queue = queue_manager.Queue()
-            black_output_queue_map[game_id] = black_output_queue
-            black_queues = {"input": black_input_queue, "output": black_output_queue}
-            white_output_queue = queue_manager.Queue()
-            white_output_queue_map[game_id] = white_output_queue
-            white_queues = {"input": white_input_queue, "output": white_output_queue}
+            bot_1_output_queue = queue_manager.Queue()
+            bot_1_output_queue_map[game_id] = bot_1_output_queue
+            bot_1_queues = {"input": bot_1_input_queue, "output": bot_1_output_queue}
+            bot_2_output_queue = queue_manager.Queue()
+            bot_2_output_queue_map[game_id] = bot_2_output_queue
+            bot_2_queues = {"input": bot_2_input_queue, "output": bot_2_output_queue}
             # On setting random seed: https://discuss.pytorch.org/t/does-getitem-of-dataloader-reset-random-seed/8097/8
             games_random_seed = np.random.randint(0, 4294967296, dtype='uint32')
-            new_game = SelfPlayGame(game_id, black_queues, white_queues, game_results_queue,
-                                    game_duration, num_simulations, games_random_seed)
+            if batch_num % 2 == 0:  # This must be batch_num, not game_num, because each processing queue waits for a full batch.
+                new_game = SelfPlayGame(game_id, bot_1_queues, bot_2_queues, game_results_queue,
+                                        game_duration, num_simulations, games_random_seed)
+            else:
+                new_game = SelfPlayGame(game_id, bot_2_queues, bot_1_queues, game_results_queue,
+                                        game_duration, num_simulations, games_random_seed)
             game_threads.append(new_game)
 
         # Provide the processing queues with their maps.
-        black_processing_queue.set_output_queue_map(black_output_queue_map)
-        white_processing_queue.set_output_queue_map(white_output_queue_map)
+        bot_1_processing_queue.set_output_queue_map(bot_1_output_queue_map)
+        bot_2_processing_queue.set_output_queue_map(bot_2_output_queue_map)
 
         # Start the games.
         for game in game_threads:
@@ -322,8 +349,8 @@ def main():
         game_id_offset += num_game_threads
 
         # Clean up the black and white processing queues.
-        black_processing_queue.end_of_batch_cleanup()
-        white_processing_queue.end_of_batch_cleanup()
+        bot_1_processing_queue.end_of_batch_cleanup()
+        bot_2_processing_queue.end_of_batch_cleanup()
 
         # Save the batch data to a single h5 file.
         batch_output_filename = os.path.join(output_dir, "batch_" + str(batch_num) + ".h5")
@@ -337,11 +364,20 @@ def main():
               " SPG: ", num_simulations, " TGL: ", game_duration)
         batch_num += 1
 
+        # If we have now completed a full cycle of batches, train the go bot.
+        if batch_num % batches_per_training_cycle:
+            # We only want to train the leading bot (bot_1). 
+            # Sending the signal will cause bot_1 to stall (because it will be training) but
+            # everything else (all the game threads and bot_2) will continue to function.
+            # They will wait for bot_1 to finish training and start processing again, which
+            # will happen automatically. 
+            bot_1_processing_queue.send_train_signal()
+
     # Join the processing thread.
-    black_processing_queue.shutdown()
-    white_processing_queue.shutdown()
-    black_processing_queue.join()
-    white_processing_queue.join()
+    bot_1_processing_queue.shutdown()
+    bot_2_processing_queue.shutdown()
+    bot_1_processing_queue.join()
+    bot_2_processing_queue.join()
 
 # Run the main function.
 if __name__ == "__main__":

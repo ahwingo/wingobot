@@ -10,7 +10,7 @@ from tensorflow.keras import metrics
 
 class PolicyValueNetwork:
 
-    def __init__(self, l2_const, starting_network_file=None, train_supervised=False):
+    def __init__(self, l2_const, starting_network_file=None, train_supervised=False, train_reinforcement=False):
 
         self.l2_const = l2_const
 
@@ -21,6 +21,11 @@ class PolicyValueNetwork:
                 self.model.compile(optimizer=tf.keras.optimizers.SGD(lr=0.01, momentum=0.9),
                                    loss={"value": tf.keras.losses.mean_squared_error, "policy": tf.keras.losses.categorical_crossentropy},
                                    loss_weights=[0.01, 1.0],
+                                   metrics=[metrics.mae, metrics.categorical_accuracy])
+            elif train_reinforcement:
+                self.model.compile(optimizer=tf.keras.optimizers.SGD(lr=0.01, momentum=0.9),
+                                   loss={"value": tf.keras.losses.mean_squared_error, "policy": tf.keras.losses.categorical_crossentropy},
+                                   loss_weights=[1.0, 1.0],
                                    metrics=[metrics.mae, metrics.categorical_accuracy])
             return
 
@@ -182,6 +187,17 @@ class PolicyValueNetwork:
         # Save the newly trained version of this model to the young_saigon.h5 file.
         # self.model.save(save_file)
         print("Done training!")
+
+    def train_on_self_play_data(self, h5_files, batch_size, num_batches, weights_outfile=None):
+        """
+        Given a list of h5 files, train on a set of randomly sampled game positions.
+        Use the Goban module to apply flips and rotations to increase variation.
+        :param h5_files: a list of paths to the h5_files that contain self play data
+        :param batch_size: how many moves to train on for a single batch (e.g. 32)
+        :param num_batches: how many batches to train on in total (e.g. 64)
+        :param weights_outfile: if provided, save the new weights to this file.
+        """
+        print("TODO")
 
     def save_checkpoint(self, ckpt_file):
         self.model.save(ckpt_file)

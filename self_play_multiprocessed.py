@@ -9,18 +9,19 @@ Inter-process communication is managed with queues, rather than with pipes.
 """
 
 import os
+import h5py
 import argparse
 import numpy as np
 from time import time
+from nn_ll_tf import *
 from gooop import Goban
 import multiprocessing as mp
 from threading import Thread
 from mcts_multiprocess import MonteCarloSearchTree
-from nn_ll_tf import *
-#from nn_ll_tf import PolicyValueNetwork
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
 
+# Sometimes this script hangs. Set this if we actually start processing so we can print a success message, just once.
 ITS_WORKING = False
 
 
@@ -31,7 +32,7 @@ class SelfPlayGame(mp.Process):
     It stores its game result in the SGF format.
     """
 
-    def __init__(self, game_id, black_processing_queues, white_processing_queues,
+    def __init__(self, game_id, black_processing_queues, white_processing_queues, game_results_queue,
                  game_duration, num_simulations, random_seed):
         """
         Initialize a game.
@@ -50,11 +51,12 @@ class SelfPlayGame(mp.Process):
 
         # Store data on this class instance.
         self.game_id = game_id
-        self.output_filename = "self_play_games/sgf/game_" + str(game_id) + ".sgf"
+        self.output_filename = "self_play_games/test_sgf/game_" + str(game_id) + ".sgf"
         self.black_processing_queues = black_processing_queues
         self.white_processing_queues = white_processing_queues
         self.game_duration = game_duration
         self.num_simulations = num_simulations
+        self.game_results_queue = game_results_queue
 
         # Initialize an empty board.
         self.board_state = Goban(13)
@@ -127,15 +129,29 @@ class SelfPlayGame(mp.Process):
         tromp_taylor_result = self.board_state.tromp_taylor_score()
         return tromp_taylor_result
 
+    def store_game_data_on_results_queue(self):
+        """
+        Call this after game play has completed (self.play_game stores the final Goban to self.board_state).
+        """
+        num_moves = len(self.board_state.move_history)
+        game_data = {"black_states": self.board_state.full_black_stones_history[:num_moves],
+                     "black_liberties": self.board_state.full_black_liberty_history[:num_moves],
+                     "white_states": self.board_state.full_white_stones_history[:num_moves],
+                     "white_liberties": self.board_state.full_white_liberty_history[:num_moves],
+                     "num_moves": num_moves,
+                     "moves": self.board_state.move_history,
+                     "outcome": self.game_outcome}
+        self.game_results_queue.put(game_data)
+
     def run(self):
-        """ Run an instance of self play on its own thread. This overwrites the superclass run function. """
-        np.random.seed(self.random_seed)
-        self.play_game()
-        self.save_game_results_sgf()
-        #self.convert_game_result_to_hdf5_format()
+            """ Run an instance of self play on its own thread. This overwrites the superclass run function. """
+            np.random.seed(self.random_seed)
+            self.play_game()
+            self.store_game_data_on_results_queue()
+            #self.save_game_results_sgf()
+            #self.convert_game_result_to_hdf5_format()
 
 
-#class ProcessingQueue(mp.Process):
 class ProcessingQueue(Thread):
     """ Manages the processing of game states across threads. """
 
@@ -204,6 +220,32 @@ class ProcessingQueue(Thread):
         self.input_queue.put("SHUTDOWN")
 
 
+def write_batch_results_to_h5(filename, results_queue):
+    """
+    This script opens an h5 file, and writes the data held in the results queue to it.
+    :param filename:
+    :param results_queue:
+    :return:
+    """
+    output_file = h5py.File(filename, "w")
+    games_section = output_file.create_group("games")
+    game_number = 0
+    while not results_queue.empty():
+        game_result = results_queue.get()
+        #winner = -1 if game_result["outcome"].startswith("W") else 1
+        single_game_section = games_section.create_group("game_" + str(game_number))
+        #single_game_section.create_dataset("outcome", data=winner, dtype=np.int8)
+        single_game_section.create_dataset("outcome", data=game_result["outcome"])
+        single_game_section.create_dataset("num_moves", data=game_result["num_moves"], dtype=np.uint8)
+        single_game_section.create_dataset("moves", data=game_result["moves"], dtype=np.uint8)
+        single_game_section.create_dataset("black_states", data=game_result["black_states"], dtype=np.int8)
+        single_game_section.create_dataset("white_states", data=game_result["white_states"], dtype=np.int8)
+        single_game_section.create_dataset("black_liberties", data=game_result["black_liberties"], dtype=np.int8)
+        single_game_section.create_dataset("white_liberties", data=game_result["white_liberties"], dtype=np.int8)
+        game_number += 1
+    output_file.close()
+
+
 def main():
     """ Run self play on a bunch of threads using this main function. """
     # Parse the input arguments.
@@ -211,20 +253,22 @@ def main():
     parser.add_argument("--game_threads", default=128, type=int)
     parser.add_argument("--game_duration", default=125, type=int)
     parser.add_argument("--num_simulations", default=5, type=int)
-    #parser.add_argument("--black_go_bot", default="young_thread_ripper_ckpt_11500.h5")
-    parser.add_argument("--black_go_bot", default="young_dark_rock_ckpt_11500.h5")
-    parser.add_argument("--white_go_bot", default="young_dark_rock_ckpt_12000.h5")
+    parser.add_argument("--black_go_bot", default="young_dark_rock/young_dark_rock_ckpt_11500.h5")
+    parser.add_argument("--white_go_bot", default="young_dark_rock/young_dark_rock_ckpt_12000.h5")
+    parser.add_argument("--game_output_dir", default="self_play_games/h5_games")
     args = parser.parse_args()
     num_game_threads = args.game_threads
     game_duration = args.game_duration
     num_simulations = args.num_simulations
     black_go_bot_file = args.black_go_bot
     white_go_bot_file = args.white_go_bot
+    output_dir = args.game_output_dir
 
-    # Create the processing queue and start it.
+    # Create the multiprocess queues that will store board states (NN inputs) and game results (nparrays for h5 files).
     queue_manager = mp.Manager()
     black_input_queue = queue_manager.Queue()
     white_input_queue = queue_manager.Queue()
+    game_results_queue = queue_manager.Queue()
 
     # Create and start the black and white player processing queues.
     black_processing_queue = ProcessingQueue(black_go_bot_file, num_game_threads, black_input_queue)
@@ -233,11 +277,12 @@ def main():
     white_processing_queue.start()
 
     # Get the game id offset. TODO make this relative to the number of games historically played.
-    game_id_offset = 0
+    game_batch_files = [int(f.split("_")[1].split(".h5")[0]) for f in os.listdir(output_dir) if f.endswith("h5")]
+    batch_num = max(game_batch_files) + 1 if game_batch_files else 0
+    game_id_offset = batch_num * num_game_threads if game_batch_files else 0
 
     # Play games until told to quit.
-    # for batch_num in range(5):
-    batch_num = 0
+    print("Starting on batch number: ", batch_num)
     while True:
 
         # Start a timer for this batch, to see how long it runs for.
@@ -257,7 +302,7 @@ def main():
             white_queues = {"input": white_input_queue, "output": white_output_queue}
             # On setting random seed: https://discuss.pytorch.org/t/does-getitem-of-dataloader-reset-random-seed/8097/8
             games_random_seed = np.random.randint(0, 4294967296, dtype='uint32')
-            new_game = SelfPlayGame(game_id, black_queues, white_queues,
+            new_game = SelfPlayGame(game_id, black_queues, white_queues, game_results_queue,
                                     game_duration, num_simulations, games_random_seed)
             game_threads.append(new_game)
 
@@ -280,11 +325,16 @@ def main():
         black_processing_queue.end_of_batch_cleanup()
         white_processing_queue.end_of_batch_cleanup()
 
+        # Save the batch data to a single h5 file.
+        batch_output_filename = os.path.join(output_dir, "batch_" + str(batch_num) + ".h5")
+        write_batch_results_to_h5(batch_output_filename, game_results_queue)
+
         # Notify that we have completed a batch.
         end_time = time()
         total_time = end_time - start_time
         print("Completed batch ", batch_num, " in ", total_time, " seconds. ",
-              "NGT: ", num_game_threads, " SPG: ", num_simulations, " TGL: ", game_duration)
+              "TGP: ", int((batch_num + 1) * num_game_threads), " NGT: ", num_game_threads,
+              " SPG: ", num_simulations, " TGL: ", game_duration)
         batch_num += 1
 
     # Join the processing thread.

@@ -6,7 +6,7 @@ import os
 import argparse
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--sgf_dir", default="self_play_games/sgf")
+parser.add_argument("--sgf_dir", default="self_play_games/sgf_from_h5")
 args = parser.parse_args()
 
 all_files = [os.path.join(args.sgf_dir, f) for f in os.listdir(args.sgf_dir) if f.endswith("sgf")]

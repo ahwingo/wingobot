@@ -64,6 +64,13 @@ class Goban:
         # Create an empty board to represent the stored history of the game. This is part of what is passed to the bot.
         self.full_history = np.zeros((2*history_length, size, size))
 
+        # Store all states that will eventually be saved to / reloaded from an h5 file.
+        self.max_moves = size**2
+        self.full_black_stones_history = np.zeros((self.max_moves, size, size), dtype=np.int8)
+        self.full_black_liberty_history = np.zeros((self.max_moves, size, size), dtype=np.int8)
+        self.full_white_stones_history = np.zeros((self.max_moves, size, size), dtype=np.int8)
+        self.full_white_liberty_history = np.zeros((self.max_moves, size, size), dtype=np.int8)
+
         # Create a single printable board, which can also be used to calculate the score.
         # Also create one for the previous state.
         self.previous_board = np.zeros((size, size))
@@ -99,7 +106,7 @@ class Goban:
         # Store the position that is illegal for the next move based on the Ko rule (be sure to clear after move made).
         self.illegal_pos_by_ko = None
 
-    def get_state_w_libs(self):
+    def get_state_w_libs_old(self):
         """ Return the state of the game in a nparray that can be processed by the wingobot NN. """
         if self.current_player == self.black:
             additional_layers = [self.black_to_go_next, self.black_liberties, self.white_liberties]
@@ -110,6 +117,41 @@ class Goban:
             states_w_libs.append(layer)
         #state_w_libs = np.append(self.full_history, additional_layers)
         return np.asarray(states_w_libs)
+
+    def get_state_w_libs(self):
+        """ Return the state of the game in a nparray that can be processed by the wingobot NN. """
+        # Store the state in layers, as F1, E1, ...., F8, E8, I-friendly, L-friendly, L-enemy
+        layers = []
+        curr_move_number = len(self.move_history)
+        # If there have been fewer moves than the requested history length, pad with zero filled layers.
+        num_pads = abs(min(0, curr_move_number - self.history_length))
+        for _ in range(num_pads):
+            layers.append(np.zeros((self.size, self.size), dtype=np.int8))
+            layers.append(np.zeros((self.size, self.size), dtype=np.int8))
+        # Identify the range of moves to append to the state list. Then add the stone state layers.
+        range_low = max(0, curr_move_number - self.history_length)
+        range_high = curr_move_number
+        for idx in range(range_low, range_high):
+            if self.current_player == self.black:
+                layers.append(self.full_black_stones_history[idx])
+                layers.append(self.full_white_stones_history[idx])
+            else:
+                layers.append(self.full_white_stones_history[idx])
+                layers.append(self.full_black_stones_history[idx])
+        # Add the identity layer.
+        if self.current_player == self.black:
+            layers.append(self.black_to_go_next)
+        else:
+            layers.append(self.white_to_go_next)
+        # Add the liberty layers.
+        if self.current_player == self.black:
+            layers.append(self.full_black_liberty_history[curr_move_number])
+            layers.append(self.full_white_liberty_history[curr_move_number])
+        else:
+            layers.append(self.full_white_liberty_history[curr_move_number])
+            layers.append(self.full_black_liberty_history[curr_move_number])
+        # Convert the layers to a numpy array and return that.
+        return np.asarray(layers)
 
     def get_legal_moves(self):
         """ Return a numpy array of the legal moves, reshaped to (size**2 + 1). """
@@ -534,13 +576,13 @@ class Goban:
     def __make_pass(self):
         self.__reset_ko()
         self.previous_board = self.current_board.copy()
-        self.__update_full_history()
+        self.__update_total_histories(row=self.size, col=self.size)
         self.set_next_player()
 
     def make_move(self, row, col):
         """
         The current player will attempt to make a move at the given row and column.
-        If the move is illegal, the board state is not changed but a warning is printed.
+        If the move is illegal, a pass is made and the board state is not changed but a warning is printed.
         :param row: the row index of the move.
         :param col: the column index of the move.
         :return: True if the move was successful / valid, False otherwise.
@@ -552,10 +594,9 @@ class Goban:
 
         # First, check if the move is in a legal spot.
         if not self.__move_is_legal(row, col):
+            print("Attempting an illegal move at row: ", row, " col: ", col, ".")
+            self.__make_pass()
             return False
-
-        # Given that the move is valid, we must update the board state. Append this move to the list of moves.
-        self.move_history.append([row, col])
 
         # Reset the Ko.
         self.__reset_ko()
@@ -576,11 +617,23 @@ class Goban:
             ko_row, ko_col = removed_stones[0]
             self.__set_ko(ko_row, ko_col)
 
-        # Update the full history board (adjusting to be from the perspective of the next player).
-        self.__update_full_history()
+        # Update the stored histories, including the list of moves, black and white board states, and liberties.
+        self.__update_total_histories(row, col)
 
         # Make it the next players turn.
         self.set_next_player()
+
+    def __update_total_histories(self, row, col):
+        """
+        Store the current mono board states (ie location of black and white stones),
+        as well as the black and white history counts, at the index of the current move.
+        """
+        history_idx = len(self.move_history)
+        self.full_black_liberty_history[history_idx] = self.black_liberties
+        self.full_white_liberty_history[history_idx] = self.white_liberties
+        self.full_black_stones_history[history_idx] = self.__get_mono_stone_board(self.black)
+        self.full_white_stones_history[history_idx] = self.__get_mono_stone_board(self.white)
+        self.move_history.append([row, col])
 
     def __update_full_history(self):
         """
@@ -692,12 +745,13 @@ class Goban:
         for row, col in move_list:
             self.make_move(row, col)
 
-
-
-
-
-
-
+    def load_game_from_moves_list(self, moves_list):
+        """
+        :param moves_list: a list of shape (N, 2) holding the row and col of each move.
+        """
+        for move in moves_list:
+            row, col = move
+            self.make_move(row, col)
 
 
 def print_board(black_board, white_board):

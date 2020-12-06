@@ -8,25 +8,49 @@ from tensorflow.keras import regularizers
 from tensorflow.keras.models import Model, load_model
 from tensorflow.keras import metrics
 
+
 class PolicyValueNetwork:
 
-    def __init__(self, l2_const, starting_network_file=None, train_supervised=False, train_reinforcement=False):
+    def __init__(self, l2_const,
+                 board_size=13,
+                 history_length=8,
+                 bot_name=None,
+                 starting_network_file=None,
+                 train_supervised=False,
+                 train_reinforcement=False):
+        """
+        Construct an instance of the the policy-value network used to eveluate board positions and select moves.
+        :param l2_const:
+        :param board_size: the size of the board (e.g. 9, 13, 19)
+        :param history_length: the number of historical board states that will be presented to the network.
+        :param starting_network_file:
+        :param train_supervised:
+        :param train_reinforcement:
+        """
+        self.name = bot_name
+        self.board_size = board_size
+        self.history_length = history_length
 
         self.l2_const = l2_const
 
         # If a model is already provided, load it from the file.
         if starting_network_file:
-            self.model = load_model(starting_network_file)
             if train_supervised:
+                self.model = load_model(starting_network_file, compile=False)
                 self.model.compile(optimizer=tf.keras.optimizers.SGD(lr=0.01, momentum=0.9),
-                                   loss={"value": tf.keras.losses.mean_squared_error, "policy": tf.keras.losses.categorical_crossentropy},
+                                   loss={"value": tf.keras.losses.mean_squared_error,
+                                         "policy": tf.keras.losses.categorical_crossentropy},
                                    loss_weights=[0.01, 1.0],
-                                   metrics=[metrics.mae, metrics.categorical_accuracy])
+                                   metrics=[metrics.mse, metrics.categorical_accuracy])
             elif train_reinforcement:
+                self.model = load_model(starting_network_file, compile=False)
                 self.model.compile(optimizer=tf.keras.optimizers.SGD(lr=0.01, momentum=0.9),
-                                   loss={"value": tf.keras.losses.mean_squared_error, "policy": tf.keras.losses.categorical_crossentropy},
+                                   loss={"value": tf.keras.losses.mean_squared_error,
+                                         "policy": tf.keras.losses.categorical_crossentropy},
                                    loss_weights=[1.0, 1.0],
-                                   metrics=[metrics.mae, metrics.categorical_accuracy])
+                                   metrics=[metrics.mse, metrics.categorical_accuracy])
+            else:
+                self.model = load_model(starting_network_file)
             return
 
         # Otherwise, build the model. It will have 19 layers and process a board of size 13x13.
@@ -93,10 +117,10 @@ class PolicyValueNetwork:
                                metrics=[metrics.mae, metrics.categorical_accuracy])
         else:
             self.model.compile(optimizer=tf.keras.optimizers.SGD(lr=0.01, momentum=0.9),
-                               loss={"value":tf.keras.losses.mean_squared_error,
+                               loss={"value": tf.keras.losses.mean_squared_error,
                                      "policy": tf.keras.losses.categorical_crossentropy},
                                loss_weights=[1.0, 1.0],
-                               metrics=[metrics.mae, metrics.categorical_accuracy])
+                               metrics=[metrics.mse, metrics.categorical_accuracy])
 
 
         print(self.model.summary())
@@ -166,27 +190,21 @@ class PolicyValueNetwork:
         training_model.save(save_file)
         print("Done training!")
 
-    def train_supervised(self, training_data_input, training_data_gt_value, training_data_gt_policy):
+    def train_supervised(self, training_data_input, training_data_gt_value, training_data_gt_policy,
+                         batch_size=32):
         """
         This function creates a copy of the model, trains it, and then replaces the model when training is done.
         :param training_data_input:
         :param training_data_gt_value:
         :param training_data_gt_policy:
+        :param batch_size:
         :return:
         """
-        print(training_data_input.shape)
-        print(training_data_gt_value.shape)
-        print(training_data_gt_policy.shape)
         # Load a copy of the model for training.
         self.model.fit(x=training_data_input,
                        y={"value": training_data_gt_value, "policy": training_data_gt_policy},
                        epochs=1, verbose=2,
-                       batch_size=32)
-
-        # TODO: Watch out for race conditions!!! Obtain a lock to update self.model.
-        # Save the newly trained version of this model to the young_saigon.h5 file.
-        # self.model.save(save_file)
-        print("Done training!")
+                       batch_size=batch_size)
 
     def train_on_self_play_data(self, h5_files, batch_size, num_batches, weights_outfile=None):
         """

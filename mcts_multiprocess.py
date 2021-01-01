@@ -103,7 +103,8 @@ class MCTSNode:
 
         # Predict a policy and value, by sending the state to the processing thread. Wait for a response.
         transmission = {"state": state_w_libs, "response_queue_id": game_id}
-        processing_queue.put(transmission)
+        msg = {"key": "STATE", "data": transmission}
+        processing_queue.put(msg)
         reception = response_queue.get()  # This is a blocking get (thread will wait for response before continuing).
         predicted_policy = reception["policy"]  # A 170 value array of weighted move options.
         predicted_value = reception["value"]  # A value indicating likelihood of winning.

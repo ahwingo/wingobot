@@ -19,7 +19,7 @@ for game_file in game_files:
     h5_file = h5py.File(game_file, "r")
     games = h5_file["games"]
     for game in games:
-        outfile = game_file.split("/")[-1].split(".")[0] + "_"+ game + ".sgf"
+        outfile = game_file.split("/")[-1].split(".")[0] + "_" + game + ".sgf"
         outfile_path = os.path.join(output_dir, outfile)
         game_data = h5_file["games"][game]
         moves = game_data["moves"]

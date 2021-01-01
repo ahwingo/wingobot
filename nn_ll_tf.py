@@ -133,6 +133,9 @@ class PolicyValueNetwork:
     def load_latest_model(self):
         self.model = load_model("young_saigon.h5")
 
+    def load_model_from_file(self, model_file):
+        self.model = load_model(model_file)
+
     def create_res_block(self, input_layer):
         res_conn = input_layer
         res_block = Conv2D(filters=256,

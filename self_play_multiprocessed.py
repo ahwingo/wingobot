@@ -11,19 +11,29 @@ Inter-process communication is managed with queues, rather than with pipes.
 import os
 import h5py
 import random
+import signal
+import logging
 import argparse
 import numpy as np
 from time import time
 from nn_ll_tf import *
 from gooop import Goban
+from threading import Event
 import multiprocessing as mp
-from threading import Thread
+from training_library import TrainingLibrary
 from mcts_multiprocess import MonteCarloSearchTree
+from player_controller import PlayerController, GoBotTrainer
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
-# Sometimes this script hangs. Set this if we actually start processing so we can print a success message, just once.
-ITS_WORKING = False
+KILLED = False
+WHITE = "White"
+BLACK = "Black"
+logging.basicConfig(filename="log_of_training.log",
+                    filemode="w",
+                    level=logging.DEBUG,
+                    format="%(name)s - %(levelname)s - %(message)s")
+logging.getLogger().addHandler(logging.StreamHandler())
 
 
 class SelfPlayGame(mp.Process):
@@ -34,7 +44,7 @@ class SelfPlayGame(mp.Process):
     """
 
     def __init__(self, game_id, black_processing_queues, white_processing_queues, game_results_queue,
-                 game_duration, num_simulations, random_seed):
+                 game_duration, num_simulations, random_seed, komi):
         """
         Initialize a game.
         :param game_id: the unique integer id of this game, used to name the output file.
@@ -60,7 +70,7 @@ class SelfPlayGame(mp.Process):
         self.game_results_queue = game_results_queue
 
         # Initialize an empty board.
-        self.board_state = Goban(13)
+        self.board_state = Goban(13, komi=komi)
 
         # Create an instance of the MCST for this game, from the perspective of the black and white players.
         self.black_search_tree = MonteCarloSearchTree(self.game_id, self.black_processing_queues, self.board_state)
@@ -76,7 +86,6 @@ class SelfPlayGame(mp.Process):
         """ Play a full game. """
         # Make moves until the game duration has been reached. Store these moves.
         for move_number in range(0, self.game_duration, 2):
-
             # Make a move from the black player's perspective.
             best_black_move = self.black_search_tree.search(self.num_simulations)
             self.moves.append(best_black_move)
@@ -88,7 +97,6 @@ class SelfPlayGame(mp.Process):
                 self.white_search_tree = MonteCarloSearchTree(self.game_id,
                                                               self.white_processing_queues,
                                                               curr_board_state)
-
             # Make a move from the white player's perspective.
             best_white_move = self.white_search_tree.search(self.num_simulations)
             self.moves.append(best_white_move)
@@ -100,10 +108,9 @@ class SelfPlayGame(mp.Process):
                 self.black_search_tree = MonteCarloSearchTree(self.game_id,
                                                               self.black_processing_queues,
                                                               curr_board_state)
-
         # Now that the game is over, store the final board state. The main thread may want to print it.
+        print("all moves made")
         self.board_state = self.black_search_tree.root.get_board_state()  # This state will be from black's perspective.
-
         # Calculate the winner of the game.
         self.game_outcome = self.calculate_game_outcome()
 
@@ -111,7 +118,7 @@ class SelfPlayGame(mp.Process):
         """ After a game has been played, the results should be stored to the output file using SGF format. """
         # If the game has not been completed, warn the user that the results cannot be stored yet.
         if not self.game_outcome:
-            print("WARNING: Game outcome cannot be saved yet. The game is still in progress.")
+            logging.warning("WARNING: Game outcome cannot be saved yet. The game is still in progress.")
 
         # If the game has completed, convert the list of moves and game outcome to SGF format.
         self.board_state.save_game_to_sgf(self.output_filename)
@@ -143,6 +150,7 @@ class SelfPlayGame(mp.Process):
                      "moves": self.board_state.move_history,
                      "outcome": self.game_outcome}
         self.game_results_queue.put(game_data)
+        print("done storing game data")
 
     def run(self):
         """ Run an instance of self play on its own thread. This overwrites the superclass run function. """
@@ -153,303 +161,41 @@ class SelfPlayGame(mp.Process):
         #self.convert_game_result_to_hdf5_format()
 
 
-class GoBotTrainer:
-    """ Instances of this class can be passed to a PlayerController to facilitate the training of its bot. """
-
-    def __init__(self, game_library, weights_directory,
-                 train_batch_size=2048,
-                 mini_batch_size=32,
-                 num_recent_games=1024):
-        """
-        :param game_library: the TrainingLibrary instance that can be used to train this player on recent games.
-        :param train_batch_size: the size of the total batch to train over during a training session.
-        :param mini_batch_size: the size of the mini batch to train over. total batches = train_batch_size / mini_bs.
-        :param num_recent_games: the number of recent games to pull examples from during training.
-        """
-        self.game_library = game_library
-        self.train_batch_size = train_batch_size
-        self.mini_batch_size = mini_batch_size
-        self.num_recent_games = num_recent_games
-        self.weights_directory = weights_directory
-        self.num_shodan_files = self.__get_shodan_file_count()
-
-    def __get_shodan_file_count(self):
-        """
-        Determine how many shodan files have already been saved.
-        """
-        shodan_files = [int(f.split("_")[-1].split(".h5")[0])
-                        for f in os.listdir(self.weights_directory) if f.endswith("h5")]
-        file_count = max(shodan_files) + 1 if shodan_files else 0
-        return file_count
-
-    def train_bot(self, bot):
-        """
-        Using the default training settings of this class, do the following:
-            - extract a full batch of training data from the game library
-            - call the bot object's training function.
-        :param bot: a PolicyValueNetwork object that should be trained.
-        """
-        game_files = self.game_library.get_last_few_h5_files(self.num_recent_games)
-        inputs, policies, values = self.game_library.get_random_training_batch(game_files, self.train_batch_size,
-                                                                               bot.history_length, bot.board_size)
-        bot.train_supervised(inputs, values, policies, self.mini_batch_size)
-
-    def save(self, bot):
-        self.num_shodan_files += 1
-        outfile = "shodan_" + bot.name + "_" + str(self.num_shodan_files) + ".h5"
-        output_path = os.path.join(self.weights_directory, outfile)
-        bot.save_checkpoint(output_path)
 
 
-class PlayerController(Thread):
-    """ Manages the processing of game states across threads. """
-    def __init__(self, go_bot_file, batch_size, input_queue, bot_name=None, trainer=None):
-        """
-        Initialize an instance of the processing queue, on the main thread.
-        :param go_bot_file: the weights file of the neural network that will process game states.
-        :param batch_size: the number of game states to process all at once.
-        :param input_queue: the queue that the game subprocesses will put states in.
-        """
-        # Initialize the superclass.
-        Thread.__init__(self)
-        # Set instance variables.
-        self.input_queue = input_queue
-        self.batch_size = batch_size
-        self.go_bot_file = go_bot_file
-        self.go_bot = None  # Initialized in the run function.
-        self.output_queue_map = None
-
-        # If this player controller will be responsible for training, store its trainer.
-        self.trainer = trainer
-        self.bot_name = bot_name
-
-    def end_of_batch_cleanup(self):
-        self.output_queue_map = None
-
-    def set_output_queue_map(self, output_queue_map):
-        """
-        :param output_queue_map: a dict matching game ids to their respective queues that the bot should put results in.
-        """
-        self.output_queue_map = output_queue_map
-
-    def process_states(self, states, response_queues):
-        """
-        This function runs the policy-value network over a batch of board states and returns the results to the
-        response queues of each individual game thread.
-        :param states: a list of board states
-        :param response_queues: a list of corresponding response queues.
-        """
-        global ITS_WORKING
-        # Convert the newly collected list of states into a numpy batch.
-        states_batch = np.asarray(states)
-        # Call the policy value network on the batch of states.
-        prior_probs, pred_values = self.go_bot.predict_given_state(states_batch, batch_size=self.batch_size)
-        # Indicate that processing has started. Sometimes it doesn't, if TF does not clear the GPU...
-        if not ITS_WORKING:
-            ITS_WORKING = True
-            print("Started processing board states.")
-        # Extract the results and send results back on the response queues.
-        for response_queue_id, policy, value in zip(response_queues, prior_probs, pred_values):
-            response = {"policy": policy, "value": value}
-            response_queue = self.output_queue_map[response_queue_id]
-            response_queue.put(response)
-
-    def run(self):
-        """ Process game states until told to stop. """
-        self.go_bot = PolicyValueNetwork(0.0001,
-                                         train_reinforcement=True,
-                                         bot_name=self.bot_name,
-                                         starting_network_file=self.go_bot_file)  # Load the wingobot network.
-        # Collect states until the batch size is reached. Then process.
-        states = []
-        response_queues = []
-        while True:
-            incoming_request = self.input_queue.get()
-            # Make sure the input message is not a shutdown request.
-            if incoming_request == "SHUTDOWN":
-                print("Processing Queue received the shutdown message. Exiting.")
-                return
-            # If the message is a training request, start training.
-            elif incoming_request == "TRAIN":
-                self.__train()
-                continue
-            elif incoming_request == "SAVE":
-                self.__save()
-                continue
-            # Otherwise the message is a state that needs to be processed.
-            else:
-                states.append(incoming_request["state"])
-                response_queues.append(incoming_request["response_queue_id"])
-            # If the number of states to process equals the batch size, process them.
-            if len(states) == self.batch_size:
-                self.process_states(states, response_queues)
-                states = []
-                response_queues = []
-
-    def shutdown(self):
-        """ When the main script quits, shut down the processing queue."""
-        self.input_queue.put("SHUTDOWN")
-
-    def send_save_signal(self):
-        """ The the go bot to save its current weights to a file. """
-        self.input_queue.put("SAVE")
-
-    def send_train_signal(self):
-        """ Tell the go bot to start training. """
-        self.input_queue.put("TRAIN")
-
-    def __train(self):
-        """ 
-        Train the go bot held by this processing queue.
-        """
-        if not self.trainer:
-            print("WARNING: Attempting to train from PlayerController without a GoBotTrainer.")
-        self.trainer.train_bot(self.go_bot)
-
-    def __save(self):
-        """
-        Save the go bot's current weights file to the next shodan file.
-        """
-        self.trainer.save(self.go_bot)
-
-
-class TrainingLibrary:
-    """
-    This class is used to keep track of self play game h5 files.
-    It stores path, and on request, will present:
-        - a list of files to pull training data from
-        - a minibatch of training data
-    """
-    def __init__(self):
-        self.registered_h5_files = []
-
-    def register_h5_file(self, h5_file):
-        """
-        Add a self play games file to the list.
-        :param h5_file:
-        :return:
-        """
-        self.registered_h5_files.append(h5_file)
-
-    def get_last_few_h5_files(self, last_few):
-        """
-        Return the last few self play files that were registered.
-        :param last_few: an integer number of the last few files to return.
-        :return: a list of file paths.
-        """
-        if last_few > len(self.registered_h5_files):
-            return self.registered_h5_files
-        return self.registered_h5_files[-last_few:]
-
-    @staticmethod
-    def get_num_pads(move_number, history_length):
-        """
-        Helper function to find the number of pads to use for the given history length and move number.
-        :param move_number:
-        :param history_length:
-        :return:
-        """
-        return abs(min(0, move_number - history_length))
-
-    @staticmethod
-    def get_actual_states_range(move_number, history_length):
-        """
-        Helper function to find the range of indices to pull actual board states from.
-        :param move_number:
-        :param history_length:
-        :return:
-        """
-        return range(max(0, move_number - history_length), move_number, 1)
-
-    @staticmethod
-    def get_random_training_batch(h5_files, batch_size, history_size, board_size):
-        """
-        Return a randomly selected batch of board states and the ground truth policy and values.
-        :param h5_files: a list of h5 files to train over.
-        :param batch_size:
-        :param history_size:
-        :param board_size:
-        :return:
-        """
-        open_game_files = [h5py.File(h5f, "r") for h5f in h5_files]
-        inputs = []
-        gt_values = []
-        gt_policies = []
-        for _ in range(batch_size):
-            random_game_file = random.choice(open_game_files)
-            random_game_num = random.choice(list(random_game_file["games"].keys()))
-            random_game = random_game_file["games"][random_game_num]
-            num_moves = random_game["num_moves"][()]
-            random_move = random.randint(0, num_moves - 1)
-
-            # Build the input.
-            input_layers = []
-            num_pads = 2 * TrainingLibrary.get_num_pads(random_move, history_size)  # 2X b/c of black & white layers.
-            for _ in range(num_pads):
-                input_layers.append(np.zeros((board_size, board_size), dtype=np.int8))
-            for idx in TrainingLibrary.get_actual_states_range(random_move, history_size):
-                if random_move % 2 == 0:  # its black to move
-                    input_layers.append(random_game["black_states"][()][idx])
-                    input_layers.append(random_game["white_states"][()][idx])
-                else:  # its white to move
-                    input_layers.append(random_game["white_states"][()][idx])
-                    input_layers.append(random_game["black_states"][()][idx])
-            if random_move % 2 == 0:
-                input_layers.append(np.ones((board_size, board_size), dtype=np.int8))  # player identity layer: B=1 W=0
-                if random_move == 0:
-                    input_layers.append(np.zeros((board_size, board_size), dtype=np.int8))
-                    input_layers.append(np.zeros((board_size, board_size), dtype=np.int8))
-                else:
-                    input_layers.append(random_game["black_liberties"][()][random_move - 1])
-                    input_layers.append(random_game["white_liberties"][()][random_move - 1])
-            else:
-                input_layers.append(np.zeros((board_size, board_size), dtype=np.int8))  # player identity layer: B=1 W=0
-                if random_move == 0:
-                    input_layers.append(np.zeros((board_size, board_size), dtype=np.int8))
-                    input_layers.append(np.zeros((board_size, board_size), dtype=np.int8))
-                else:
-                    input_layers.append(random_game["white_liberties"][()][random_move - 1])
-                    input_layers.append(random_game["black_liberties"][()][random_move - 1])
-
-            # Extract the policy.
-            policy = np.zeros(1 + board_size ** 2, dtype=np.int8)
-            row, col = random_game["moves"][()][random_move]
-            move_idx = min(row * board_size + col, 169)  # 169 indicates a pass (row = col = 13  --->  182)
-            policy[move_idx] = 1
-
-            # Extract the value.
-            outcome = random_game["outcome"][()]
-            if random_move % 2 == 0:
-                value = 1 if outcome[0] == "B" else -1
-            else:
-                value = 1 if outcome[0] == "W" else -1
-
-            # Add the input, policy, and value to the list.
-            inputs.append(input_layers)
-            gt_policies.append(policy)
-            gt_values.append(value)
-
-        # Close any files that you opened.
-        [f.close() for f in open_game_files]
-        # Return the inputs, policies, and values.
-        inputs = np.asarray(inputs)
-        gt_values = np.reshape(np.asarray(gt_values), (batch_size, 1))
-        gt_policies = np.asarray(gt_policies)
-        return inputs, gt_policies, gt_values
-
-
-def write_batch_results_to_h5(filename, results_queue):
+def write_batch_results_to_h5(filename, results_queue, leader=WHITE):
     """
     This script opens an h5 file, and writes the data held in the results queue to it.
     :param filename:
     :param results_queue:
-    :return:
+    :param leader: the color of the leading (training) player for this batch, for statistics reporting purposes.
+    :return: the win likelihood for the leading player, from [0.0, 1.0].
     """
+    # If the results queue is empty, something has gone wrong...
+    if results_queue.empty():
+        logging.warning("The game results queue is empty... Something has gone wrong for " + filename)
+        return 0.0
+    # Record some useful diagnostic statistics.
+    total_black_wins = 0
+    total_black_score = 0
+    total_white_wins = 0
+    total_white_score = 0
+    # Build the output file.
     output_file = h5py.File(filename, "w")
     games_section = output_file.create_group("games")
     game_number = 0
+    # Store all games in this batch to the output file.
     while not results_queue.empty():
         game_result = results_queue.get()
+        # Extract the score data and add to the stats.
+        outcome = game_result["outcome"]
+        if outcome.startswith("W"):
+            total_white_wins += 1
+            total_white_score += float(outcome[2:])
+        else:
+            total_black_wins += 1
+            total_black_score += float(outcome[2:])
+        # Write the game attributes to the file.
         single_game_section = games_section.create_group("game_" + str(game_number))
         single_game_section.create_dataset("outcome", data=game_result["outcome"])
         single_game_section.create_dataset("num_moves", data=game_result["num_moves"], dtype=np.uint8)
@@ -460,33 +206,70 @@ def write_batch_results_to_h5(filename, results_queue):
         single_game_section.create_dataset("white_liberties", data=game_result["white_liberties"], dtype=np.int8)
         game_number += 1
     output_file.close()
+    if game_number == 0:
+        logging.warning("For some reason the game number for this batch is zero so there is nothing to save...")
+        return 0.0
+    # Print the stats and return the win likelihood of the leading player.
+    logging.debug("TW_B: {0}  AWM_B: {1}  TW_W: {2}  AWM_W: {3}".format(
+                  total_black_wins, total_black_score / game_number,
+                  total_white_wins, total_white_score / game_number))
+    if leader == WHITE:
+        return total_white_wins / (total_white_wins + total_black_wins)
+    else:
+        return total_black_wins / (total_black_wins + total_white_wins)
+
+
+def shutdown(sig, frame):
+    global KILLED
+    print("should shutdown. got signal")
+    KILLED = True
 
 
 def main():
     """ Run self play on a bunch of threads using this main function. """
     # Parse the input arguments.
     parser = argparse.ArgumentParser()
-    parser.add_argument("--game_threads", default=12, type=int)
-    parser.add_argument("--game_duration", default=15, type=int)
-    parser.add_argument("--num_simulations", default=5, type=int)
-    parser.add_argument("--batches_per_training_cycle", default=1, type=int)
+    """
+    parser.add_argument("--game_threads", default=128, type=int)
+    parser.add_argument("--game_duration", default=164, type=int)
+    parser.add_argument("--num_simulations", default=4, type=int)
+    parser.add_argument("--batches_per_training_cycle", default=8, type=int)
     parser.add_argument("--training_cycles_per_save", default=4, type=int)
+    parser.add_argument("--komi", default=6.5, type=float)
     parser.add_argument("--weights_dir", default="shodan_dark_rock")
     parser.add_argument("--leading_bot_name", default="dark_rock")
-    parser.add_argument("--go_bot_1", default="young_dark_rock/young_dark_rock_ckpt_11500.h5")
-    parser.add_argument("--go_bot_2", default="young_dark_rock/young_dark_rock_ckpt_12000.h5")
+    parser.add_argument("--go_bot_1", default="young_dark_rock/young_dark_rock_ckpt_12000.h5")
+    parser.add_argument("--go_bot_2", default="young_dark_rock/young_dark_rock_ckpt_10000.h5")
     parser.add_argument("--game_output_dir", default="self_play_games/h5_games")
+    """
+    parser.add_argument("--game_threads", default=8, type=int)
+    parser.add_argument("--game_duration", default=16, type=int)
+    parser.add_argument("--num_simulations", default=2, type=int)
+    parser.add_argument("--batches_per_training_cycle", default=2, type=int)
+    parser.add_argument("--training_cycles_per_save", default=2, type=int)
+    parser.add_argument("--komi", default=1.5, type=float)
+    parser.add_argument("--weights_dir", default="shodan_dark_rock")
+    parser.add_argument("--leading_bot_name", default="dark_rock")
+    parser.add_argument("--go_bot_1", default="young_dark_rock/young_dark_rock_ckpt_12000.h5")
+    parser.add_argument("--go_bot_2", default="young_dark_rock/young_dark_rock_ckpt_10000.h5")
+    parser.add_argument("--game_output_dir", default="crapdir")
+
     args = parser.parse_args()
     num_game_threads = args.game_threads
     game_duration = args.game_duration
     num_simulations = args.num_simulations
     batches_per_training_cycle = args.batches_per_training_cycle
     training_cycles_per_save = args.training_cycles_per_save
+    komi = args.komi
     weights_dir = args.weights_dir
     leading_bot_name = args.leading_bot_name
     go_bot_1_file = args.go_bot_1
     go_bot_2_file = args.go_bot_2
     output_dir = args.game_output_dir
+
+    # Define the shutdown function signal handlers.
+    signal.signal(signal.SIGTERM, shutdown)
+    signal.signal(signal.SIGINT, shutdown)
 
     # Create the multiprocess queues that will store board states (NN inputs) and game results (nparrays for h5 files).
     queue_manager = mp.Manager()
@@ -514,9 +297,15 @@ def main():
     num_weights_file_updates = 0  # TODO Give better name... Make relative to the number of shodan files...
     game_id_offset = batch_num * num_game_threads if game_batch_files else 0
 
+    # Keep track of which color the leading bot plays as during each batch.
+    leader = BLACK
+
+    # Use this flag to identify if it is time to swap the followers weights with the leaders.
+    recently_saved_weights = False  # Set to true after saving weights, but set to false after updating the follower.
+
     # Play games until told to quit.
-    print("Starting on batch number: ", batch_num)
-    while True:
+    logging.debug("Starting on batch number: %d" % batch_num)
+    while not KILLED:
 
         # Start a timer for this batch, to see how long it runs for.
         start_time = time()
@@ -525,6 +314,8 @@ def main():
         bot_1_output_queue_map = {}
         bot_2_output_queue_map = {}
         game_threads = []
+        print("b1qm: ", bot_1_output_queue_map)
+        print("b2qm: ", bot_2_output_queue_map)
         for game_num in range(num_game_threads):
             game_id = game_id_offset + game_num
             bot_1_output_queue = queue_manager.Queue()
@@ -538,11 +329,15 @@ def main():
             # Each batch, alternate between which player is white and which is black.
             # This must be batch_num, not game_num, because each processing queue waits for a full batch.
             if batch_num % 2 == 0:
+                # The leading player will play as black.
+                leader = BLACK
                 new_game = SelfPlayGame(game_id, bot_1_queues, bot_2_queues, game_results_queue,
-                                        game_duration, num_simulations, games_random_seed)
+                                        game_duration, num_simulations, games_random_seed, komi=komi)
             else:
+                # The leading player will play as white.
+                leader = WHITE
                 new_game = SelfPlayGame(game_id, bot_2_queues, bot_1_queues, game_results_queue,
-                                        game_duration, num_simulations, games_random_seed)
+                                        game_duration, num_simulations, games_random_seed, komi=komi)
             game_threads.append(new_game)
 
         # Provide the processing queues with their maps.
@@ -552,10 +347,12 @@ def main():
         # Start the games.
         for game in game_threads:
             game.start()
+            print("starting a new game thread")
 
         # Join the running threads when they have completed.
         for completed_game in game_threads:
             completed_game.join()
+            print("closing a completed game thread")
 
         # Increment the game id offset.
         game_id_offset += num_game_threads
@@ -566,25 +363,37 @@ def main():
 
         # Save the batch data to a single h5 file. Register it with the library.
         batch_output_filename = os.path.join(output_dir, "batch_" + str(batch_num) + ".h5")
-        write_batch_results_to_h5(batch_output_filename, game_results_queue)
+        leader_win_likelihood = write_batch_results_to_h5(batch_output_filename, game_results_queue, leader=leader)
         game_library.register_h5_file(batch_output_filename)
 
         # Notify that we have completed a batch.
         end_time = time()
         total_time = end_time - start_time
-        print("Completed batch ", batch_num, " in ", total_time, " seconds. ",
-              "TGP: ", int((batch_num + 1) * num_game_threads), " NGT: ", num_game_threads,
-              " SPG: ", num_simulations, " TGL: ", game_duration)
+        logging.debug("Completed batch {0} in {1} seconds.  TGP: {2}  NGT: {3}  SGP {4} TGL: {5}  LDR: {6}  LWL: {7}".format( 
+                      batch_num, total_time, int((batch_num + 1) * num_game_threads), num_game_threads, num_simulations,
+                      game_duration, leader, leader_win_likelihood))
         batch_num += 1
 
         # If we have now completed a full cycle of batches, train the go bot (only for the leading player).
         if batch_num % batches_per_training_cycle == 0:
             bot_1_processing_queue.send_train_signal()
             num_weights_file_updates += 1
+            bot_1_processing_queue.locked.wait()
+            bot_1_processing_queue.locked.clear()
 
         # If we have completed the requisite number of training cycles, save the weights file for the leading player.
         if num_weights_file_updates % training_cycles_per_save == 0:
             bot_1_processing_queue.send_save_signal()
+            recently_saved_weights = True
+            bot_1_processing_queue.locked.wait()
+            bot_1_processing_queue.locked.clear()
+
+        # If we have recently saved the weights and the leader is beating the follower, update the follower.
+        if recently_saved_weights and leader_win_likelihood > 0.55:
+            print("\n\n AN UPDATE WOULD OCCUR HERE...\n\n")
+            #leader_weights_path = bot_1_processing_queue.get_latest_weights_file()
+            #bot_2_processing_queue.send_update_signal(leader_weights_path)
+            #recently_saved_weights = False
 
     # Join the processing thread.  # TODO Write a proper shutdown handler.
     bot_1_processing_queue.shutdown()

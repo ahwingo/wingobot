@@ -167,11 +167,6 @@ class PolicyValueNetwork:
         pred_value, prior_probs = self.model.predict(model_inputs, batch_size=batch_size)
         return prior_probs, pred_value
 
-    def print_model(self):
-        from tf.keras.utils import plot_model
-        plot_model(self.model, to_file='model.png')
-        tf.keras.utils.print_summary(self.model)
-
     def save_model_to_file(self, model_filename):
         self.model.save(model_filename)
 

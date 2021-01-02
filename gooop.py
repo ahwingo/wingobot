@@ -6,6 +6,7 @@ import numpy as np
 import random
 import copy
 
+
 class String:
     """
     This class may be used to represent a string and its liberty counts. Maybe.

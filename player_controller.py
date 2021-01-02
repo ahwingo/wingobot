@@ -58,7 +58,6 @@ class GoBotTrainer:
         output_path = os.path.join(self.weights_directory, outfile)
         bot.save_checkpoint(output_path)
         self.last_saved_game = output_path
-        print("saved to ", self.last_saved_game)
 
     def get_latest_weights_file(self):
         return self.last_saved_game
@@ -118,12 +117,10 @@ class PlayerController(Thread):
         # Extract the results and send results back on the response queues.
         num_puts = 0
         for response_queue_id, policy, value in zip(response_queues, prior_probs, pred_values):
-            print(response_queue_id)
             response = {"policy": policy, "value": value}
             response_queue = self.output_queue_map[response_queue_id]
             response_queue.put(response)
             num_puts += 1
-        print("num response queues: ", num_response_queues, " num states in: ", states_received, " num put outs: ", num_puts)
 
 
     def run(self):
@@ -159,7 +156,6 @@ class PlayerController(Thread):
                 continue
             # Otherwise the message is a state that needs to be processed.
             elif msg_key == "STATE":
-                print("got state to process")
                 states.append(msg_data["state"])
                 response_queues.append(msg_data["response_queue_id"])
             # If the number of states to process equals the batch size, process them.
@@ -196,19 +192,15 @@ class PlayerController(Thread):
         """
         Train the go bot held by this processing queue.
         """
-        print("starting training")
         if not self.trainer:
             logging.warning("Attempting to train from PlayerController without a GoBotTrainer.")
         self.trainer.train_bot(self.go_bot)
-        print("done training")
 
     def __save(self):
         """
         Save the go bot's current weights file to the next shodan file.
         """
-        print("starting to save...")
         self.trainer.save(self.go_bot)
-        print("saved....")
 
     def __update(self, new_weights):
         """

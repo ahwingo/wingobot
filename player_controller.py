@@ -3,10 +3,10 @@ This module implements a player controller, which runs on its own thread and pro
 It also handles training and updating a go bot.
 """
 
-from nn_ll_tf import PolicyValueNetwork
 from threading import Thread, Event
+from time import time
 import numpy as np
-import logging
+import sys
 import os
 
 
@@ -31,6 +31,20 @@ class GoBotTrainer:
         self.num_shodan_files = self.__get_shodan_file_count()
         self.last_saved_game = ""
 
+    def __sizeof__(self):
+        """
+        Get the total size of this object and all of its references.
+        """
+        total_size = 0
+        total_size += sys.getsizeof(self.game_library)
+        total_size += sys.getsizeof(self.train_batch_size)
+        total_size += sys.getsizeof(self.mini_batch_size)
+        total_size += sys.getsizeof(self.num_recent_games)
+        total_size += sys.getsizeof(self.weights_directory)
+        total_size += sys.getsizeof(self.num_shodan_files)
+        total_size += sys.getsizeof(self.last_saved_game)
+        return total_size
+
     def __get_shodan_file_count(self):
         """
         Determine how many shodan files have already been saved.
@@ -47,7 +61,7 @@ class GoBotTrainer:
             - call the bot object's training function.
         :param bot: a PolicyValueNetwork object that should be trained.
         """
-        game_files = self.game_library.get_last_few_h5_files(self.num_recent_games)
+        game_files = self.game_library.get_last_few_h5_files(self.num_recent_games // 128)
         inputs, policies, values = self.game_library.get_random_training_batch(game_files, self.train_batch_size,
                                                                                bot.history_length, bot.board_size)
         bot.train_supervised(inputs, values, policies, self.mini_batch_size)
@@ -56,7 +70,8 @@ class GoBotTrainer:
         self.num_shodan_files += 1
         outfile = "shodan_" + bot.name + "_" + str(self.num_shodan_files) + ".h5"
         output_path = os.path.join(self.weights_directory, outfile)
-        bot.save_checkpoint(output_path)
+        bot.save_checkpoint(output_path)  # Saves the model to both an h5 file and pb file.
+        bot.optimize_w_trt()  # Optimizes the model with TensorRT for faster inference.
         self.last_saved_game = output_path
 
     def get_latest_weights_file(self):
@@ -91,6 +106,22 @@ class PlayerController(Thread):
         # Use this lock to prevent issues between threads.
         self.locked = Event()
 
+    def __sizeof__(self):
+        """
+        Get the total size of this object and all of its references.
+        """
+        total_size = 0
+        total_size += sys.getsizeof(self.input_queue)
+        total_size += sys.getsizeof(self.batch_size)
+        total_size += sys.getsizeof(self.go_bot_file)
+        total_size += sys.getsizeof(self.go_bot)
+        total_size += sys.getsizeof(self.output_queue_map)
+        total_size += sys.getsizeof(self.new_weights)
+        total_size += sys.getsizeof(self.trainer)
+        total_size += sys.getsizeof(self.bot_name)
+        total_size += sys.getsizeof(self.locked)
+        return total_size
+
     def end_of_batch_cleanup(self):
         self.output_queue_map = None
 
@@ -112,7 +143,11 @@ class PlayerController(Thread):
         # Convert the newly collected list of states into a numpy batch.
         states_batch = np.asarray(states)
         # Call the policy value network on the batch of states.
-        prior_probs, pred_values = self.go_bot.predict_given_state(states_batch, batch_size=self.batch_size)
+        start = time()
+        #prior_probs, pred_values = self.go_bot.predict_given_state(states_batch, batch_size=self.batch_size)
+        prior_probs, pred_values = self.go_bot.predict_w_trt(states_batch, batch_size=self.batch_size)
+        end = time()
+        #print("Processing states took {} seconds.".format(end - start))
         # Indicate that processing has started. Sometimes it doesn't, if TF does not clear the GPU...
         # Extract the results and send results back on the response queues.
         num_puts = 0
@@ -122,9 +157,9 @@ class PlayerController(Thread):
             response_queue.put(response)
             num_puts += 1
 
-
     def run(self):
         """ Process game states until told to stop. """
+        from nn_ll_tf import PolicyValueNetwork
         self.go_bot = PolicyValueNetwork(0.0001,
                                          train_reinforcement=True,
                                          bot_name=self.bot_name,
@@ -132,13 +167,14 @@ class PlayerController(Thread):
         # Collect states until the batch size is reached. Then process.
         states = []
         response_queues = []
+        start = time()
         while True:
             incoming_request = self.input_queue.get()
             msg_key = incoming_request["key"]
             msg_data = incoming_request["data"]
             # Make sure the input message is not a shutdown request.
             if msg_key == "SHUTDOWN":
-                logging.debug("Processing Queue received the shutdown message. Exiting.")
+                print("Processing Queue received the shutdown message. Exiting.")
                 return
             # If the message is a training request, start training.
             elif msg_key == "TRAIN":
@@ -151,7 +187,7 @@ class PlayerController(Thread):
                 continue
             elif msg_key == "UPDATE":
                 self.__update(msg_data["new_weights"])
-                logging.debug("Updated the weights file to use: " + msg_data["new_weights"])
+                print("Updated the weights file to use: " + msg_data["new_weights"])
                 self.locked.set()
                 continue
             # Otherwise the message is a state that needs to be processed.
@@ -160,9 +196,12 @@ class PlayerController(Thread):
                 response_queues.append(msg_data["response_queue_id"])
             # If the number of states to process equals the batch size, process them.
             if len(states) == self.batch_size:
+                end = time()
+                #print("It took {} seconds to get all the game states to process.".format(end - start))
                 self.process_states(states, response_queues)
                 states = []
                 response_queues = []
+                start = time()
 
     def shutdown(self):
         """ When the main script quits, shut down the processing queue."""
@@ -193,7 +232,7 @@ class PlayerController(Thread):
         Train the go bot held by this processing queue.
         """
         if not self.trainer:
-            logging.warning("Attempting to train from PlayerController without a GoBotTrainer.")
+            print("Attempting to train from PlayerController without a GoBotTrainer.")
         self.trainer.train_bot(self.go_bot)
 
     def __save(self):

@@ -5,6 +5,9 @@ This module implements a Goban class and functions related to storing and scorin
 import numpy as np
 import random
 import copy
+import sys
+sys.path.append("score-estimator")
+from ogs_estimator import estimate as ogs_estimate
 
 
 class String:
@@ -15,6 +18,16 @@ class String:
         self.string_id = string_id
         self.indices = indices
         self.liberties = liberties
+
+    def __sizeof__(self):
+        """
+        Get the total size of this object and its attributes.
+        """
+        total_size = 0
+        total_size += sys.getsizeof(self.string_id)
+        total_size += sys.getsizeof(self.indices)
+        total_size += sys.getsizeof(self.liberties)
+        return total_size
 
     def liberty_count(self):
         return len(self.liberties)
@@ -66,7 +79,7 @@ class Goban:
         self.full_history = np.zeros((2*history_length, size, size))
 
         # Store all states that will eventually be saved to / reloaded from an h5 file.
-        self.max_moves = size**2
+        self.max_moves = size**2 + size  # TODO You may need to raise this threshold. It appears there is an odd bug causing an issue related to this.
         self.full_black_stones_history = np.zeros((self.max_moves, size, size), dtype=np.int8)
         self.full_black_liberty_history = np.zeros((self.max_moves, size, size), dtype=np.int8)
         self.full_white_stones_history = np.zeros((self.max_moves, size, size), dtype=np.int8)
@@ -106,6 +119,42 @@ class Goban:
 
         # Store the position that is illegal for the next move based on the Ko rule (be sure to clear after move made).
         self.illegal_pos_by_ko = None
+
+    def __sizeof__(self):
+        """
+        Get the total size of this object and all of its references.
+        """
+        total_size = 0
+        total_size += sys.getsizeof(self.black)
+        total_size += sys.getsizeof(self.white)
+        total_size += sys.getsizeof(self.no_move)
+        total_size += sys.getsizeof(self.size)
+        total_size += sys.getsizeof(self.history_length)
+        total_size += sys.getsizeof(self.move_history)
+        total_size += sys.getsizeof(self.pass_idx)
+        total_size += sys.getsizeof(self.full_history)
+        total_size += sys.getsizeof(self.max_moves)
+        total_size += sys.getsizeof(self.full_black_stones_history)
+        total_size += sys.getsizeof(self.full_black_liberty_history)
+        total_size += sys.getsizeof(self.full_white_stones_history)
+        total_size += sys.getsizeof(self.full_white_liberty_history)
+        total_size += sys.getsizeof(self.previous_board)
+        total_size += sys.getsizeof(self.current_board)
+        total_size += sys.getsizeof(self.komi)
+        total_size += sys.getsizeof(self.black_string_count)
+        total_size += sys.getsizeof(self.white_string_count)
+        total_size += sys.getsizeof(self.strings)
+        total_size += sys.getsizeof(self.string_board)
+        total_size += sys.getsizeof(self.current_player)
+        total_size += sys.getsizeof(self.black_to_go_next)
+        total_size += sys.getsizeof(self.white_to_go_next)
+        total_size += sys.getsizeof(self.black_liberties)
+        total_size += sys.getsizeof(self.white_liberties)
+        total_size += sys.getsizeof(self.available_liberties)
+        total_size += sys.getsizeof(self.legal_black_moves)
+        total_size += sys.getsizeof(self.legal_white_moves)
+        total_size += sys.getsizeof(self.illegal_pos_by_ko)
+        return total_size
 
     def get_state_w_libs_old(self):
         """ Return the state of the game in a nparray that can be processed by the wingobot NN. """
@@ -160,6 +209,21 @@ class Goban:
             return np.append(np.reshape(self.legal_black_moves, (self.size**2)), [1])
         else:
             return np.append(np.reshape(self.legal_white_moves, (self.size**2)), [1])
+
+    def ogs_score(self):
+        """
+        Use the OGS scoring algorithm, from the ogs-estimator repo.
+        """
+        flat_int_curr_board = np.reshape(self.current_board, self.size**2).astype(int).tolist()
+        trials = 1000
+        tolerance = 0.4
+        final_score = ogs_estimate(self.size, self.size, flat_int_curr_board,
+                                   self.current_player, trials, tolerance) - self.komi
+        # Return a string in SGF format.
+        if final_score > 0:
+            return "B+" + str(final_score)
+        else:
+            return "W+" + str(final_score*-1)
 
     def fast_score(self):
         """
@@ -551,15 +615,13 @@ class Goban:
 
     def __reset_ko(self):
         """
-        Reset the position that was an illegal move based on the Ko rule.
+        Reset the position that was an illegal move based on the Ko rule, if and only if the move will
+        actually be legal based on liberty counts and capture potential.
         :return:
         """
         if self.illegal_pos_by_ko:
             ko_row, ko_col = self.illegal_pos_by_ko
-            if self.current_player == self.black:
-                self.__set_legal_for_black(ko_row, ko_col)
-            elif self.current_player == self.white:
-                self.__set_legal_for_white(ko_row, ko_col)
+            self.__set_legality_dependent_on_liberties(ko_row, ko_col)
             self.illegal_pos_by_ko = None
 
     def __set_ko(self, row, col):
@@ -591,7 +653,8 @@ class Goban:
         # Check if this move is a pass.
         if row == 13 or col == 13:
             self.__make_pass()
-            return
+            #print("Making a pass. Current player: ", self.current_player)
+            return False
 
         # First, check if the move is in a legal spot.
         if not self.__move_is_legal(row, col):
@@ -623,6 +686,7 @@ class Goban:
 
         # Make it the next players turn.
         self.set_next_player()
+        return True
 
     def __update_total_histories(self, row, col):
         """
@@ -674,6 +738,17 @@ class Goban:
         """
         """
         return self.current_board
+
+
+    def get_current_str_ids(self):
+        """
+        """
+        return self.string_board
+
+    def get_current_lib_counts(self):
+        """
+        """
+        return self.black_liberties + self.white_liberties, np.reshape(self.available_liberties, (self.size, self.size))
 
     def save_game_to_sgf(self, outfile):
         """
@@ -754,6 +829,31 @@ class Goban:
             row, col = move
             self.make_move(row, col)
 
+    def print_board(self):
+        """
+        Print a board to stdout, using emojis to represent the board and stones.
+        :param black_board:
+        :param white_board:
+        :return:
+        """
+        header = "  "
+        for x in range(self.size):
+            header += str(x) + " "
+        print(header)
+        for row in range(self.size):
+            current_line = str(row) + " "
+            for col in range(self.size):
+                if self.current_board[row, col] == 1:
+                    #current_line += " \U000026AB "
+                    current_line += " \U0001F535 "
+                elif self.current_board[row, col] == -1:
+                    #current_line += " \U000026AA "
+                    current_line += " \U0001F534 "
+                else:
+                    current_line += " \U00002795 "
+            print(current_line)
+        print("\n\n")
+
 
 def print_board(black_board, white_board):
     # TODO Definitely keep this as a class method, but just use the single board. It will be simpler that way.
@@ -766,18 +866,20 @@ def print_board(black_board, white_board):
     current_line = ""
     for idx in range(169):
         if black_board[idx] == 1:
-            current_line += " \U000026AB "
+            #current_line += " \U000026AB "
+            current_line += "\U0001F535"
         elif white_board[idx] == 1:
-            current_line += " \U000026AA "
+            #current_line += "\U000026AA "
+            current_line += "\U0001F534"
         else:
-            current_line += " \U00002795 "
+            #current_line += " \U00002795 "
+            current_line += "+"
 
         if (idx+1) % 13 == 0:
             print(current_line)
             current_line = ""
 
     print("\n\n")
-
 
 
 def transform_board_and_policy(board, policy):

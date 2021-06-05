@@ -1,3 +1,4 @@
+import sys
 import math
 import numpy as np
 
@@ -11,16 +12,21 @@ TEMP_SWITCH_THRESHOLD = 30
 class MCTSNode:
     """ Class representing a node of the monte carlo search tree. """
 
-    def __init__(self, board, parent=None, action_idx=None):
+    def __init__(self, board, parent=None, action_idx=None, adopted=False):
         """
         :param state: a 17x13x13 array representing board state (self.expand() will add two layers for liberty counts).
         """
         self.board = board
 
+        # Indicate if the node was explored by the current tree using MCTS or adopted from the other player.
+        self.adopted = adopted
+
+        self.player_color = "BLACK" if self.board.current_player == self.board.black else "WHITE"
+
         self.fully_expanded = False
         self.parent = parent
 
-        self.action_idx = action_idx
+        self.action_idx = action_idx                  # A move at this index in the previous state led to this node.
 
         self.predicted_value = None                   # V(s)
         self.prior_probs = None                       # P(s, a)
@@ -42,6 +48,31 @@ class MCTSNode:
         ld_prevent.append(-0.5)
         self.ld_prevent = ld_prevent
 
+        # Once we have selected a maximum action index, store it here.
+        self.best_action = None
+
+        # Keep track of how many time this objects select_child_w_best_puct() func is called.
+        self.traversal_count = 0
+
+    def __sizeof__(self):
+        """
+        Get the total size of this object and all of its references.
+        """
+        total_size = 0
+        total_size += sys.getsizeof(self.board)
+        total_size += sys.getsizeof(self.fully_expanded)
+        total_size += sys.getsizeof(self.parent)  # Shouldn't this just give the size of the pointer, not the object?
+        total_size += sys.getsizeof(self.action_idx)
+        total_size += sys.getsizeof(self.predicted_value)
+        total_size += sys.getsizeof(self.prior_probs)
+        total_size += sys.getsizeof(self.visit_count)
+        total_size += sys.getsizeof(self.total_action_value)
+        total_size += sys.getsizeof(self.mean_action_value)
+        total_size += sys.getsizeof(self.legal_actions)
+        total_size += sys.getsizeof(self.children)  # Shouldn't this just give the size of the pointer, not the object?
+        total_size += sys.getsizeof(self.ld_prevent)
+        return total_size
+
     def select_best_action(self, temperature):
         """
         The move that is finally selected is the move with the most visits, relative to the total number of visits made,
@@ -53,9 +84,10 @@ class MCTSNode:
         exponentiated_visits = [vis_cnt ** (1.0 / temperature) for vis_cnt in self.visit_count]
         total_exponentiated_visits = sum(exponentiated_visits)
         dirchlect_noise_coeff = 3  # Just the number 3...
-        dirichlet_probs = np.random.dirichlet([dirchlect_noise_coeff]*170)*10
+        dirichlet_probs = np.random.dirichlet([dirchlect_noise_coeff]*170)
         probs = (dirichlet_probs + exponentiated_visits + self.ld_prevent) / total_exponentiated_visits
         best_option = np.argmax(probs)
+        self.best_action = best_option
         return best_option
 
     def back_propagate(self, sim_result):
@@ -101,6 +133,8 @@ class MCTSNode:
         # First, get the liberty layers, given the current state.
         state_w_libs = self.board.get_state_w_libs()
 
+        # TODO Step 1: Apply a transformation to the states.
+
         # Predict a policy and value, by sending the state to the processing thread. Wait for a response.
         transmission = {"state": state_w_libs, "response_queue_id": game_id}
         msg = {"key": "STATE", "data": transmission}
@@ -108,6 +142,8 @@ class MCTSNode:
         reception = response_queue.get()  # This is a blocking get (thread will wait for response before continuing).
         predicted_policy = reception["policy"]  # A 170 value array of weighted move options.
         predicted_value = reception["value"]  # A value indicating likelihood of winning.
+
+        # TODO Step 2: Apply the reverse transformation to the states.
 
         # Filter out illegal moves.
         best_legal_moves = self.legal_actions*predicted_policy
@@ -140,9 +176,14 @@ class MCTSNode:
             adjusted_prior_probs = self.apply_dirichlet_noise(self.prior_probs)
         total_visits = sum(self.visit_count) + 1  # Make this plus one, so the first move is not always the final idx.
 
-        puct_values = self.mean_action_value + PUCT_CONST * adjusted_prior_probs * math.sqrt(total_visits) / (1.0 + self.visit_count)
+        puct_values = self.mean_action_value
+        puct_values += PUCT_CONST * adjusted_prior_probs * math.sqrt(total_visits) / (1.0 + self.visit_count)
+        puct_values += np.ones(len(puct_values)) * abs(puct_values.min())  # Offset by the minimum value.
         puct_values *= self.legal_actions
         max_action = np.argmax(puct_values)
+        if not self.legal_actions[max_action] == 1:
+            max_action = np.argmax(self.legal_actions)
+            print("Selecting first legal action ({}), since all other actions were low in value...".format(max_action))
 
         # Given the move w/ the best predicted value, create a child (if DNE) to represent the board given this action.
         if max_action not in self.children:
@@ -151,7 +192,11 @@ class MCTSNode:
             board_copy = self.board.copy()
             move_row = max_action // 13
             move_col = max_action % 13
-            board_copy.make_move(move_row, move_col)  # TODO This may break if the max value is a pass...
+            move_was_legal = board_copy.make_move(move_row, move_col)  # TODO This may break if the max value is a pass...
+            if not move_was_legal and move_row != 13 and move_col != 13:
+                print("Illegal move made during child selection. Row {} Col {}".format(move_row, move_col))
+                print("Max action idx: ", max_action, " max value: ", puct_values[max_action])
+                print("Min puct value: ", puct_values.min())
 
             # Create the child node and add it to this nodes list of children.
             child_node = MCTSNode(board_copy, parent=self, action_idx=max_action)
@@ -160,6 +205,7 @@ class MCTSNode:
         # Return the child node identified by the move with the best PUCT value.
         mod13 = max_action % 13
         div13 = max_action // 13
+        self.traversal_count += 1
         return self.children[max_action]
 
     def send_parent_to_nursing_home(self):
@@ -169,6 +215,52 @@ class MCTSNode:
     def get_board_state(self):
         """ Provide the current board state of this node. """
         return self.board
+
+    def print_tree(self, depth=0, only_child=False):
+        """
+        This function is called by the MonteCarloSearchTree class to print the full tree, using the prefix method.
+        It should return a string in SGF prefix tree format.
+        :param depth: the current depth of the print (for indentation)
+        """
+        # Use this dict to map move numbers to characters.
+        if self.action_idx:
+            chars = "abcdefghijklmnopqrstuvwxyz"
+            idx_char_map = {idx: char for idx, char in enumerate(chars[:self.board.size])}
+            idx_char_map[self.board.size] = ""
+            row = self.action_idx // self.board.size
+            row_char = idx_char_map[row]
+            col = self.action_idx % self.board.size
+            col_char = idx_char_map[col]
+            if col_char == "" or row_char == "":
+                col_char = ""
+                row_char = ""
+            player_code = ";W" if self.player_color == "BLACK" else ";B"  # We need the player who played the last stone.
+            move_code = "[" + row_char + col_char + "]"
+            if self.adopted:
+                move_code += "C[This move was adopted from the opponent.]"
+            if self.traversal_count > 0:
+                move_code += "C[This node was traversed {} times.]".format(self.traversal_count)
+        else:
+            player_code = ""
+            move_code = ""
+
+        # If the node is an only child, print it inline with its parent.
+        if only_child:
+            prefix_string = player_code + move_code
+        else:  # Put the string on a newline and indent it.
+            prefix_string = "\n"
+            for _ in range(depth):
+                prefix_string += " "
+            prefix_string += "("
+            prefix_string += player_code + move_code
+        if len(self.children) == 1:
+            for child in self.children.values():
+                prefix_string += child.print_tree(depth=depth+1, only_child=True)
+        else:
+            for child in self.children.values():
+                prefix_string += child.print_tree(depth=depth+1)
+        prefix_string += ")"
+        return prefix_string
 
 
 class MonteCarloSearchTree:
@@ -189,8 +281,62 @@ class MonteCarloSearchTree:
         self.results_queue = state_processing_queues["output"]
         self.root = root if root else MCTSNode(root_board)  # Create the root node, if it hasn't been provided.
         self.root.send_parent_to_nursing_home()  # Make sure the root does not have parents. Brutal...
+        self.orig_root = self.root  # Keep a reference to the original root so that we can print the tree.
         self.temperature = INITIAL_TEMP
         self.search_count = 0
+
+    def __sizeof__(self):
+        """
+        Get the total size of this object and all of its references.
+        """
+        total_size = 0
+        total_size += sys.getsizeof(self.tree_id)
+        total_size += sys.getsizeof(self.state_processing_queue)
+        total_size += sys.getsizeof(self.results_queue)
+        total_size += sys.getsizeof(self.root)
+        total_size += sys.getsizeof(self.temperature)
+        total_size += sys.getsizeof(self.search_count)
+        return total_size
+
+    def print_tree(self, outfile=None):
+        """
+        This method writes the current game tree to an SGF string.
+        If an outfile is provided, write the data to the file.
+        """
+        # Use this dict to map move numbers to characters.
+        chars = "abcdefghijklmnopqrstuvwxyz"
+        idx_char_map = {idx: char for idx, char in enumerate(chars[:self.root.board.size])}
+
+        # First write out the header.
+        header = "(;GM[1]FF[4]CA[UTF-8]RU[Chinese]SZ[13]KM[7.5]TM[600]PW[wingobot]PB[wingobot]WR[00]BR[00]DT[2020-07-30]PC[wingo-desktop]RE[W+1000]GN[007];"
+
+        # Next get the state out to the root node.
+        already_black = "AB"
+        already_white = "AW"
+        for move_idx in range(0, len(self.orig_root.board.move_history), 2):  # Black moves at even indices.
+            row, col = self.root.board.move_history[move_idx]
+            row_char = idx_char_map[row]
+            col_char = idx_char_map[col]
+            already_black += "[" + row_char + col_char + "]"
+        for move_idx in range(1, len(self.orig_root.board.move_history), 2):  # Black moves at odd indices.
+            row, col = self.root.board.move_history[move_idx]
+            row_char = idx_char_map[row]
+            col_char = idx_char_map[col]
+            already_white += "[" + row_char + col_char + "]"
+        if already_white != "AW":
+            header += already_white
+        if already_black != "AB":
+             header += already_black
+        header += "C[Moves played so far at root state.]"
+            
+        # Start traversing the tree.
+        header += self.orig_root.print_tree(depth=0, only_child=True)
+
+        # Write the sgf to file (optional) and return.
+        if outfile:
+            with open(outfile, "w") as f:
+                f.write(header)
+        return header
 
     def update_root(self, new_root_node):
         """
@@ -199,6 +345,18 @@ class MonteCarloSearchTree:
         """
         self.root = new_root_node
         self.root.send_parent_to_nursing_home()  # Since this is the new root, it shouldn't have parents.
+
+    def update_on_opponent_selection(self, move_idx, board_after_move):
+        """
+        Given a move selection from the opponent, point the root pointer at the corresponding child in the tree.
+        """
+        if move_idx in self.root.children:
+            self.root = self.root.children[move_idx]
+            self.root.send_parent_to_nursing_home()
+        else:
+            new_node = MCTSNode(board_after_move, action_idx=move_idx, adopted=True)  # No need to set parent, since its root.
+            self.root.children[move_idx] = new_node
+            self.root = new_node
 
     def search(self, num_simulations):
         """
@@ -232,7 +390,7 @@ class MonteCarloSearchTree:
         """
         Walk the tree (typically starting at the root node) until we reach a node that has not been expanded.
         :param node:
-        :return:
+        :return: a MCTSNode that has not been expanded (this will be self.root on the first simulation).
         """
         while node.fully_expanded:
             node = node.select_child_with_best_puct()

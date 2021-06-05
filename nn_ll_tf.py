@@ -1,8 +1,7 @@
 import numpy as np
-#import os
-#os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-#os.environ["CUDA_VISIBLE_DEVICES"] = ""
 import tensorflow as tf
+from tensorflow.python.compiler.tensorrt import trt_convert as trt
+from tensorflow.python.saved_model import tag_constants
 from tensorflow.keras.layers import Input, Dense, Activation, Conv2D, BatchNormalization, Reshape
 from tensorflow.keras import regularizers
 from tensorflow.keras.models import Model, load_model
@@ -17,7 +16,8 @@ class PolicyValueNetwork:
                  bot_name=None,
                  starting_network_file=None,
                  train_supervised=False,
-                 train_reinforcement=False):
+                 train_reinforcement=False,
+                 trt_mode=False):
         """
         Construct an instance of the the policy-value network used to eveluate board positions and select moves.
         :param l2_const:
@@ -32,6 +32,13 @@ class PolicyValueNetwork:
         self.history_length = history_length
 
         self.l2_const = l2_const
+        self.trt_mode = trt_mode
+
+        self.trt_model = None  # Create this when you are in the self play process. Use for faster inference.
+        conversion_params = trt.DEFAULT_TRT_CONVERSION_PARAMS
+        conversion_params = conversion_params._replace(max_workspace_size_bytes=(1 << 32))
+        self.conversion_params = conversion_params._replace(precision_mode="FP16")
+        self.trt_inference_func = None
 
         # If a model is already provided, load it from the file.
         if starting_network_file:
@@ -51,6 +58,10 @@ class PolicyValueNetwork:
                                    metrics=[metrics.mse, metrics.categorical_accuracy])
             else:
                 self.model = load_model(starting_network_file)
+            # Initialize the TRT model.
+            if trt_mode:
+                self.save_model_to_pb_dir()
+                self.optimize_w_trt()
             return
 
         # Otherwise, build the model. It will have 19 layers and process a board of size 13x13.
@@ -121,20 +132,15 @@ class PolicyValueNetwork:
                                      "policy": tf.keras.losses.categorical_crossentropy},
                                loss_weights=[1.0, 1.0],
                                metrics=[metrics.mse, metrics.categorical_accuracy])
-
-
         print(self.model.summary())
-
-        #self.model._make_predict_function()
-
-        # Save the model so we can load it in a different thread!!
-        #self.save_model_to_file("young_saigon.h5")
 
     def load_latest_model(self):
         self.model = load_model("young_saigon.h5")
 
     def load_model_from_file(self, model_file):
         self.model = load_model(model_file)
+        if self.trt_mode:
+            self.optimize_w_trt()
 
     def create_res_block(self, input_layer):
         res_conn = input_layer
@@ -164,11 +170,42 @@ class PolicyValueNetwork:
         return res_block
 
     def predict_given_state(self, model_inputs, batch_size=1):
+        if self.trt_mode:
+            return self.predict_w_trt(model_inputs)
         pred_value, prior_probs = self.model.predict(model_inputs, batch_size=batch_size)
         return prior_probs, pred_value
 
-    def save_model_to_file(self, model_filename):
-        self.model.save(model_filename)
+    def save_model_to_pb_dir(self):
+        if not self.trt_mode:
+            return
+        tf.saved_model.save(self.model, "tmp_pb_model_dir")
+
+    def optimize_w_trt(self):
+        """
+        Optimize the model using TensorRT.
+        Load the latest saved network, convert it to an FP16 TensorRT model, and load that.
+        """
+        if not self.trt_mode:
+            return
+        converter = trt.TrtGraphConverterV2(input_saved_model_dir="tmp_pb_model_dir",
+                                            conversion_params=self.conversion_params)
+        converter.convert()
+        converter.save("tmp_trt_model_dir")
+        self.trt_model = tf.saved_model.load("tmp_trt_model_dir", tags=[tag_constants.SERVING])
+        self.trt_inference_func = self.trt_model.signatures["serving_default"]
+
+    def predict_w_trt(self, inputs, batch_size=1):
+        """
+        Perform inference using the TRT graph.
+        """
+        if not self.trt_mode:
+            return self.predict_given_state(inputs, batch_size=batch_size)
+        if not self.trt_model:
+            print("The TensorRT model has not been created. Therefore inference cannot be called.")
+            raise Exception
+        inputs = tf.constant(inputs, dtype=float)
+        output = self.trt_inference_func(inputs)
+        return output["policy"].numpy(), output["value"].numpy()
 
     def train(self, training_data_input, training_data_gt_value, training_data_gt_policy, save_file):
         """
@@ -217,5 +254,6 @@ class PolicyValueNetwork:
 
     def save_checkpoint(self, ckpt_file):
         self.model.save(ckpt_file)
+        self.save_model_to_pb_dir()
 
 

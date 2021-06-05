@@ -9,6 +9,7 @@ Inter-process communication is managed with queues, rather than with pipes.
 """
 
 import os
+import sys
 import h5py
 import random
 import signal
@@ -21,6 +22,7 @@ import multiprocessing as mp
 from training_library import TrainingLibrary
 from mcts_multiprocess import MonteCarloSearchTree
 from player_controller import PlayerController, GoBotTrainer
+from threading import Thread
 
 
 KILLED = False
@@ -69,6 +71,7 @@ class SelfPlayGame(mp.Process):
         # Create an instance of the MCST for this game, from the perspective of the black and white players.
         self.black_search_tree = MonteCarloSearchTree(self.queue_id, self.black_processing_queues, self.board_state)
         self.white_search_tree = MonteCarloSearchTree(self.queue_id, self.white_processing_queues, self.board_state)
+        self.original_search_tree = self.black_search_tree
 
         # The moves made during the game will be stored here, in order. e.g. [B1, W1, B2, W2, ...]
         self.moves = []
@@ -76,14 +79,38 @@ class SelfPlayGame(mp.Process):
         # The winner of the game will be stored in the output file, whenever the game ends.
         self.game_outcome = None
 
+    def __sizeof__(self):
+        """
+        Get the full size of this object and its references.
+        """
+        total_size = 0
+        total_size += sys.getsizeof(self.random_seed)
+        total_size += sys.getsizeof(self.game_id)
+        total_size += sys.getsizeof(self.queue_id)
+        total_size += sys.getsizeof(self.output_filename)
+        total_size += sys.getsizeof(self.black_processing_queues)
+        total_size += sys.getsizeof(self.white_processing_queues)
+        total_size += sys.getsizeof(self.game_duration)
+        total_size += sys.getsizeof(self.num_black_simulations)
+        total_size += sys.getsizeof(self.num_white_simulations)
+        total_size += sys.getsizeof(self.game_results_queue)
+        total_size += sys.getsizeof(self.board_state)
+        total_size += sys.getsizeof(self.black_search_tree)
+        total_size += sys.getsizeof(self.white_search_tree)
+        total_size += sys.getsizeof(self.moves)
+        total_size += sys.getsizeof(self.game_outcome)
+        return total_size
+
     def play_game(self):
         """ Play a full game. """
         # Make moves until the game duration has been reached. Store these moves.
         for move_number in range(0, self.game_duration, 2):
+            total_size = sys.getsizeof(self)
             # Make a move from the black player's perspective.
             best_black_move = self.black_search_tree.search(self.num_black_simulations)
             self.moves.append(best_black_move)
             # Update the white tree to reflect the move. White may have already explored this state.
+            """
             if best_black_move in self.white_search_tree.root.children:
                 self.white_search_tree.update_root(self.white_search_tree.root.children[best_black_move])
             else:
@@ -91,9 +118,14 @@ class SelfPlayGame(mp.Process):
                 self.white_search_tree = MonteCarloSearchTree(self.queue_id,
                                                               self.white_processing_queues,
                                                               curr_board_state)
+            """
+            curr_board_state = self.black_search_tree.root.get_board_state().copy()
+            self.white_search_tree.update_on_opponent_selection(best_black_move, curr_board_state)
+
             # Make a move from the white player's perspective.
             best_white_move = self.white_search_tree.search(self.num_white_simulations)
             self.moves.append(best_white_move)
+            """
             # Update the black tree to reflect the move.
             if best_white_move in self.black_search_tree.root.children:
                 self.black_search_tree.update_root(self.black_search_tree.root.children[best_white_move])
@@ -102,6 +134,9 @@ class SelfPlayGame(mp.Process):
                 self.black_search_tree = MonteCarloSearchTree(self.queue_id,
                                                               self.black_processing_queues,
                                                               curr_board_state)
+            """
+            curr_board_state = self.white_search_tree.root.get_board_state().copy()
+            self.black_search_tree.update_on_opponent_selection(best_white_move, curr_board_state)
         # Now that the game is over, store the final board state. The main thread may want to print it.
         self.board_state = self.black_search_tree.root.get_board_state()  # This state will be from black's perspective.
         # Calculate the winner of the game.
@@ -149,6 +184,8 @@ class SelfPlayGame(mp.Process):
         np.random.seed(self.random_seed)
         self.play_game()
         self.store_game_data_on_results_queue()
+        print("\n\n=============================================================================================\n")
+        print(self.original_search_tree.print_tree("tree_print_test.sgf"))
 
 
 def write_batch_results_to_h5(filename, results_queue, leader=WHITE):
@@ -215,38 +252,81 @@ def shutdown(sig, frame):
     KILLED = True
 
 
-def main():
-    """ Run self play on a bunch of threads using this main function. """
-    # Parse the input arguments.
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--game_threads", default=128, type=int)
-    parser.add_argument("--game_duration", default=128, type=int)
-    parser.add_argument("--num_simulations_leader", default=32, type=int)
-    parser.add_argument("--num_simulations_follower", default=32, type=int)
-    parser.add_argument("--batches_per_training_cycle", default=4, type=int)
-    parser.add_argument("--training_cycles_per_save", default=1, type=int)
-    parser.add_argument("--komi", default=6.5, type=float)
-    parser.add_argument("--weights_dir", default="shodan_fossa")
-    parser.add_argument("--leading_bot_name", default="focal_fossa")
-    parser.add_argument("--go_bot_1", default="shodan_fossa/shodan_focal_fossa_135.h5")
-    parser.add_argument("--go_bot_2", default="shodan_fossa/shodan_focal_fossa_134.h5")
-    parser.add_argument("--game_output_dir", default="self_play_games/h5_games")
+class FakeGoBot(Thread):
+    """
+    Instances of this class will randomly select a move and stick it back on the results queue.
+    To be used for speed testing of the self play MCTS algorithm.
+    """
+    def __init__(self, batch_size, input_queue):
+        """
+        Construct an instance of the FakeGoBot. Similar to the PlayerController.
+        """
+        # Initialize the superclass.
+        Thread.__init__(self)
+        # Set instance variables.
+        self.input_queue = input_queue
+        self.batch_size = batch_size
+        self.output_queue_map = None
 
-    args = parser.parse_args()
-    num_game_threads = args.game_threads
-    game_duration = args.game_duration
-    num_leader_simulations = args.num_simulations_leader
-    num_follower_simulations = args.num_simulations_follower
-    batches_per_training_cycle = args.batches_per_training_cycle
-    training_cycles_per_save = args.training_cycles_per_save
-    komi = args.komi
-    weights_dir = args.weights_dir
-    leading_bot_name = args.leading_bot_name
-    go_bot_1_file = args.go_bot_1
-    go_bot_2_file = args.go_bot_2
-    output_dir = args.game_output_dir
+        # Use this lock to prevent issues between threads.
+        self.locked = Event()
 
-    # Define the shutdown function signal handlers.
+    def end_of_batch_cleanup(self):
+        self.output_queue_map = None
+
+    def set_output_queue_map(self, output_queue_map):
+        """
+        :param output_queue_map: a dict matching game ids to their respective queues that the bot should put results in.
+        """
+        self.output_queue_map = output_queue_map
+
+    def process_states(self, response_queues):
+        """
+        This function runs the policy-value network over a batch of board states and returns the results to the
+        response queues of each individual game thread.
+        :param states: a list of board states
+        :param response_queues: a list of corresponding response queues.
+        """
+        # Extract the results and send results back on the response queues.
+        num_puts = 0
+        policy = np.random.random(170)
+        value = np.random.random(1)
+        for response_queue_id in response_queues:
+            response = {"policy": policy, "value": value}
+            response_queue = self.output_queue_map[response_queue_id]
+            response_queue.put(response)
+            num_puts += 1
+
+    def run(self):
+        """ Process game states until told to stop. """
+        # Collect states until the batch size is reached. Then process.
+        states = []
+        response_queues = []
+        while True:
+            incoming_request = self.input_queue.get()
+            msg_key = incoming_request["key"]
+            msg_data = incoming_request["data"]
+            # Make sure the input message is not a shutdown request.
+            if msg_key == "SHUTDOWN":
+                print("Processing Queue received the shutdown message. Exiting.")
+                return
+            elif msg_key == "STATE":
+                states.append(msg_data["state"])
+                response_queues.append(msg_data["response_queue_id"])
+            # If the number of states to process equals the batch size, process them.
+            if len(states) == self.batch_size:
+                self.process_states(response_queues)
+                states = []
+                response_queues = []
+
+    def shutdown(self):
+        """ When the main script quits, shut down the processing queue."""
+        msg = {"key": "SHUTDOWN", "data": None}
+        self.input_queue.put(msg)
+
+
+def speed_test(num_game_threads, game_duration, num_leader_simulations, num_follower_simulations, komi, trials, real_bot=False):
+    # Define the shutdown signals.
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
 
@@ -262,38 +342,27 @@ def main():
     bot_2_output_queues = [queue_manager.Queue() for _ in range(num_game_threads)]
     bot_2_output_queues_map = {idx: output_q for idx, output_q in enumerate(bot_2_output_queues)}
 
-    # Keep a registry of saved game files.
-    game_library = TrainingLibrary()
-
-    # Create a trainer for the leading player.
-    bot_trainer = GoBotTrainer(game_library, weights_dir)
-
     # Create and start the black and white player processing queues.
-    bot_1_processing_queue = PlayerController(go_bot_1_file, num_game_threads, bot_1_input_queue,
-                                              bot_name=leading_bot_name,
-                                              trainer=bot_trainer)
-    bot_1_processing_queue.start()
-    bot_2_processing_queue = PlayerController(go_bot_2_file, num_game_threads, bot_2_input_queue)
-    bot_2_processing_queue.start()
+    if real_bot:
+        bot_1_processing_queue = PlayerController("shodan_fossa/shodan_focal_fossa_101.h5", num_game_threads, bot_1_input_queue)
+        bot_1_processing_queue.start()
+        bot_2_processing_queue = PlayerController("shodan_fossa/shodan_focal_fossa_102.h5", num_game_threads, bot_2_input_queue)
+        bot_2_processing_queue.start()
+    else:
+        bot_1_processing_queue = FakeGoBot(num_game_threads, bot_1_input_queue)
+        bot_1_processing_queue.start()
+        bot_2_processing_queue = FakeGoBot(num_game_threads, bot_2_input_queue)
+        bot_2_processing_queue.start()
 
     # Provide the processing queues with their maps.
     bot_1_processing_queue.set_output_queue_map(bot_1_output_queues_map)
     bot_2_processing_queue.set_output_queue_map(bot_2_output_queues_map)
 
-    # Get the game id offset. TODO make this relative to the number of games historically played.
-    game_batch_files = [int(f.split("_")[1].split(".h5")[0]) for f in os.listdir(output_dir) if f.endswith("h5")]
-    batch_num = max(game_batch_files) + 1 if game_batch_files else 0
-    game_id_offset = batch_num * num_game_threads if game_batch_files else 0
-
     # Keep track of which color the leading bot plays as during each batch.
     leader = BLACK
 
-    # Use this flag to identify if it is time to swap the followers weights with the leaders.
-    recently_saved_weights = False  # Set to true after saving weights, but set to false after updating the follower.
-
     # Play games until told to quit.
-    print("Starting on batch number: %d" % batch_num)
-    while not KILLED:
+    for trial_num in range(trials):
 
         # Start a timer for this batch, to see how long it runs for.
         start_time = time()
@@ -301,7 +370,7 @@ def main():
         # Spin up games on their own threads.
         game_threads = []
         for game_num in range(num_game_threads):
-            game_id = game_id_offset + game_num
+            game_id = game_num
             bot_1_output_queue = bot_1_output_queues[game_num]
             bot_1_queues = {"input": bot_1_input_queue, "output": bot_1_output_queue}
             bot_2_output_queue = bot_2_output_queues[game_num]
@@ -310,7 +379,7 @@ def main():
             games_random_seed = np.random.randint(0, 4294967296, dtype='uint32')
             # Each batch, alternate between which player is white and which is black.
             # This must be batch_num, not game_num, because each processing queue waits for a full batch.
-            if batch_num % 2 == 0:
+            if trial_num % 2 == 0:
                 # The leading player will play as black.
                 leader = BLACK
                 new_game = SelfPlayGame(game_id, game_num, bot_1_queues, bot_2_queues, game_results_queue,
@@ -332,51 +401,48 @@ def main():
         for completed_game in game_threads:
             completed_game.join()
 
-        # Increment the game id offset.
-        game_id_offset += num_game_threads
-
-        # Save the batch data to a single h5 file. Register it with the library.
-        batch_output_filename = os.path.join(output_dir, "batch_" + str(batch_num) + ".h5")
-        leader_win_likelihood = write_batch_results_to_h5(batch_output_filename, game_results_queue, leader=leader)
-        game_library.register_h5_file(batch_output_filename)
-
         # Notify that we have completed a batch.
         end_time = time()
         total_time = end_time - start_time
-        print("Completed batch {0} in {1} seconds.  TGP: {2}  NGT: {3}  SGP {4} TGL: {5}  LDR: {6}  LWL: {7}".format(
-              batch_num, total_time, int((batch_num + 1) * num_game_threads), num_game_threads,
-              num_leader_simulations, game_duration, leader, leader_win_likelihood))
-        batch_num += 1
+        total_games_played = int((trial_num + 1) * num_game_threads)
+        total_states_evaluated = num_game_threads*(num_leader_simulations+num_follower_simulations)*game_duration/2
+        states_per_second = total_states_evaluated / total_time
+        print("Comp. batch {0} in {1} secs. TGP: {2} NGT: {3} SPM {4} TGL: {5} SPS: {6}".format(trial_num,
+                                                                                                total_time,
+                                                                                                total_games_played,
+                                                                                                num_game_threads,
+                                                                                                num_leader_simulations,
+                                                                                                game_duration,
+                                                                                                states_per_second))
 
-        # If we have now completed a full cycle of batches, train the go bot (only for the leading player).
-        if batch_num % batches_per_training_cycle == 0:
-            bot_1_processing_queue.send_train_signal()
-            bot_1_processing_queue.locked.wait()
-            bot_1_processing_queue.locked.clear()
-
-        # If we have completed the requisite number of training cycles, save the weights file for the leading player.
-        if batch_num % (batches_per_training_cycle * training_cycles_per_save) == 0:
-            bot_1_processing_queue.send_save_signal()
-            recently_saved_weights = True
-            bot_1_processing_queue.locked.wait()
-            bot_1_processing_queue.locked.clear()
-
-        # If we have recently saved the weights and the leader is beating the follower, update the follower.
-        if recently_saved_weights and leader_win_likelihood > 0.55:
-            leader_weights_path = bot_1_processing_queue.get_latest_weights_file()
-            bot_2_processing_queue.send_update_signal(leader_weights_path)
-            recently_saved_weights = False
-            bot_2_processing_queue.locked.wait()
-            bot_2_processing_queue.locked.clear()
-
-    # Join the processing thread.  # TODO Write a proper shutdown handler.
+    # Join the processing thread.
     bot_1_processing_queue.shutdown()
     bot_2_processing_queue.shutdown()
     bot_1_processing_queue.join()
     bot_2_processing_queue.join()
 
 
-# Run the main function.
+def main():
+    """ Run self play on a bunch of threads using this main function. """
+    # Parse the input arguments.
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-gt", "--game_threads", default=1, type=int)
+    parser.add_argument("-gd", "--game_duration", default=32, type=int)
+    parser.add_argument("-nsl", "--num_simulations_leader", default=200, type=int)
+    parser.add_argument("-nsf", "--num_simulations_follower", default=2, type=int)
+    parser.add_argument("--komi", default=6.5, type=float)
+    parser.add_argument("--trials", default=1, type=float, help="Number of speed tests to run and average over.")
+    args = parser.parse_args()
+    num_game_threads = args.game_threads
+    game_duration = args.game_duration
+    num_leader_simulations = args.num_simulations_leader
+    num_follower_simulations = args.num_simulations_follower
+    komi = args.komi
+    trials = args.trials
+    speed_test(num_game_threads, game_duration, num_leader_simulations, num_follower_simulations, komi, trials, real_bot=True)
+
 if __name__ == "__main__":
     mp.set_start_method("spawn")
     main()
+
+

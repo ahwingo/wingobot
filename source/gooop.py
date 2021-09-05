@@ -79,7 +79,7 @@ class Goban:
         self.pass_idx = [size, size]
 
         # Create an empty board to represent the stored history of the game. This is part of what is passed to the bot.
-        self.full_history = np.zeros((2*history_length, size, size))
+        self.full_history = np.zeros((2*history_length, size, size), dtype=np.int8)
 
         # Store all states that will eventually be saved to / reloaded from an h5 file.
         self.max_moves = size**2 + size  # TODO You may need to raise this threshold. It appears there is an odd bug causing an issue related to this.
@@ -90,8 +90,8 @@ class Goban:
 
         # Create a single printable board, which can also be used to calculate the score.
         # Also create one for the previous state.
-        self.previous_board = np.zeros((size, size))
-        self.current_board = np.zeros((size, size))
+        self.previous_board = np.zeros((size, size), dtype=np.int8)
+        self.current_board = np.zeros((size, size), dtype=np.int8)
         self.komi = komi
 
         # Keep track of the active black and white strings.
@@ -102,26 +102,60 @@ class Goban:
 
         # Create matrices to represent the player to move next (1 == black, 0 == white).
         self.current_player = self.black
-        self.black_to_go_next = np.ones((size, size))
-        self.white_to_go_next = np.zeros((size, size))
+        self.black_to_go_next = np.ones((size, size), dtype=np.int8)
+        self.white_to_go_next = np.zeros((size, size), dtype=np.int8)
 
         # Create two matrices to represent the black and white liberties.
-        self.black_liberties = np.zeros((size, size))
-        self.white_liberties = np.zeros((size, size))
+        self.black_liberties = np.zeros((size, size), dtype=np.int8)
+        self.white_liberties = np.zeros((size, size), dtype=np.int8)
 
         # Also keep track of the liberties available at each intersection.
-        self.available_liberties = np.ones((size, size)) * 4
+        self.available_liberties = np.ones((size, size), dtype=np.int8) * 4
         self.available_liberties[0, :] -= 1
         self.available_liberties[size - 1, :] -= 1
         self.available_liberties[:, 0] -= 1
         self.available_liberties[:, size - 1] -= 1
 
         # Create matrices to represent the legal moves available to the white and black players.
-        self.legal_black_moves = np.ones((size, size))
-        self.legal_white_moves = np.ones((size, size))
+        self.legal_black_moves = np.ones((size, size), dtype=np.int8)
+        self.legal_white_moves = np.ones((size, size), dtype=np.int8)
 
         # Store the position that is illegal for the next move based on the Ko rule (be sure to clear after move made).
         self.illegal_pos_by_ko = None
+
+    def __del__(self):
+        """
+        Ensure this object is freed properly. Delete all children.
+        """
+        del self.black
+        del self.white
+        del self.no_move
+        del self.size
+        del self.history_length
+        del self.move_history
+        del self.pass_idx
+        del self.full_history
+        del self.max_moves
+        del self.full_black_stones_history
+        del self.full_black_liberty_history
+        del self.full_white_stones_history
+        del self.full_white_liberty_history
+        del self.previous_board
+        del self.current_board
+        del self.komi
+        del self.black_string_count
+        del self.white_string_count
+        del self.strings
+        del self.string_board
+        del self.current_player
+        del self.black_to_go_next
+        del self.white_to_go_next
+        del self.black_liberties
+        del self.white_liberties
+        del self.available_liberties
+        del self.legal_black_moves
+        del self.legal_white_moves
+        del self.illegal_pos_by_ko
 
     def __sizeof__(self):
         """

@@ -1,6 +1,7 @@
 import sys
 import math
 import numpy as np
+import copy
 
 # Set a few global variables.
 PUCT_CONST = 0.03
@@ -53,6 +54,30 @@ class MCTSNode:
 
         # Keep track of how many time this objects select_child_w_best_puct() func is called.
         self.traversal_count = 0
+
+    def copy(self):
+        return copy.deepcopy(self)
+
+    def __del__(self):
+        """
+        Ensure this object is freed properly. Delete all children.
+        """
+        del self.board
+        del self.adopted
+        del self.player_color
+        del self.fully_expanded
+        del self.parent
+        del self.action_idx
+        del self.predicted_value
+        del self.prior_probs
+        del self.visit_count
+        del self.total_action_value
+        del self.mean_action_value
+        del self.legal_actions
+        del self.children
+        del self.ld_prevent
+        del self.best_action
+        del self.traversal_count
 
     def __sizeof__(self):
         """
@@ -210,6 +235,7 @@ class MCTSNode:
 
     def send_parent_to_nursing_home(self):
         """ Perform garbage collection on the node's parent. Do this if the node is now the new root."""
+        del self.parent
         self.parent = None
 
     def get_board_state(self):
@@ -395,5 +421,17 @@ class MonteCarloSearchTree:
         while node.fully_expanded:
             node = node.select_child_with_best_puct()
         return node
+
+    def __del__(self):
+        """
+        Ensure this object is freed properly. Delete all children.
+        """
+        del self.tree_id
+        del self.state_processing_queue
+        del self.results_queue
+        del self.root
+        del self.orig_root
+        del self.temperature
+        del self.search_count
 
 

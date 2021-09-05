@@ -18,7 +18,7 @@ from source.mcts_multiprocess import MonteCarloSearchTree
 from source.player_controller import PlayerController
 
 
-class MatPlotLibPlayer:
+class MPLPlayer:
     """
     An object to manage game play over a matplotlib GUI.
     """
@@ -50,15 +50,15 @@ class MatPlotLibPlayer:
         self.total_moves = 0
 
         # Create the GUI board.
-        self.fig = plt.self.figure()
+        self.fig = plt.figure()
         self.ax = self.fig.add_subplot(111)
         self.ax.set_facecolor('xkcd:sandy')
-        self.ax.self.axis('equal')
+        self.ax.axis('equal')
         self.ax.set(xlim=(0, 12), ylim=(0, 12))
         self.ax.set_xticks(np.arange(13))
         self.ax.set_yticks(np.arange(13))
         self.ax.grid(color="xkcd:black", linewidth=1)
-        self.ax.set_self.axisbelow(True)
+        self.ax.set_axisbelow(True)
         self.ax.set_aspect('equal', 'box')
 
         # Create the user click callback.
@@ -76,27 +76,34 @@ class MatPlotLibPlayer:
             y_pos = int(event.ydata)
             y_extra = event.ydata - y_pos
             # Determine the corresponding rows and columns.
+            valid_click = False
             if x_extra < threshold_low and y_extra < threshold_low:
                 row = 12 - y_pos
                 col = x_pos
+                valid_click = True
             elif x_extra < threshold_low and y_extra > threshold_high:
                 row = 12 - y_pos - 1
                 col = x_pos
+                valid_click = True
             elif x_extra > threshold_high and y_extra < threshold_low:
                 row = 12 - y_pos
                 col = x_pos + 1
+                valid_click = True
             elif x_extra > threshold_high and y_extra > threshold_high:
                 row = 12 - y_pos - 1
                 col = x_pos + 1
+                valid_click = True
             # Make the human move.
-            self.make_human_move(row, col)
-            human_move = row * 13 + col
-            # Make a bot move, if there are still moves to be made.
-            if self.total_moves < self.game_len:
-                self.make_bot_move(human_move=human_move)
+            if valid_click:
+                self.make_human_move(row, col)
+                human_move = row * 13 + col
+                # Make a bot move, if there are still moves to be made.
+                if self.total_moves < self.game_len:
+                    self.make_bot_move(human_move=human_move)
         self.fig.canvas.mpl_connect('button_press_event', on_click)
 
     def make_human_move(self, row, col):
+        print(row, col)
         self.attempt_move(row, col)
 
     def make_bot_move(self, human_move=None):
@@ -114,12 +121,12 @@ class MatPlotLibPlayer:
     def reset_plot(self):
         self.ax.clear()
         self.ax.set_facecolor('xkcd:sandy')
-        self.ax.self.axis('equal')
+        self.ax.axis('equal')
         self.ax.set(xlim=(0, 12), ylim=(0, 12))
         self.ax.set_xticks(np.arange(13))
         self.ax.set_yticks(np.arange(13))
         self.ax.grid(color="xkcd:black", linewidth=1)
-        self.ax.set_self.axisbelow(True)
+        self.ax.set_axisbelow(True)
         self.ax.set_aspect('equal', 'box')
 
     def set_stone_of_color(self, row, col, stone_color):
@@ -138,8 +145,7 @@ class MatPlotLibPlayer:
         """
         # Make the move.
         self.reset_plot()
-        adjusted_row = 12 - row
-        self.go_board.make_move(adjusted_row, col)
+        self.go_board.make_move(row, col)
         current_board = self.go_board.get_current_board()
         for s_row in range(13):
             for s_col in range(13):
@@ -167,6 +173,11 @@ class MatPlotLibPlayer:
         plt.close()
         self.bot_player_controller.shutdown()
 
+    def save_game(self, outfile):
+        """
+        Save the game to an SGF file.
+        """
+        self.go_board.save_game_to_sgf(outfile)
 
 def main():
     # Set some game params.
@@ -185,12 +196,12 @@ def main():
 
     # Create and start a player.
     bot_color = "B" if args.color == "W" else "W"
-    cli_player = CLIPlayer(args.length, bot_color, args.simulations, args.botfile)
-    cli_player.start_game()
+    mpl_player = MPLPlayer(args.length, bot_color, args.simulations, args.botfile)
+    mpl_player.start_game()
 
     # When the game ends, save it and shut the bot down.
-    cli_player.save_game(args.outfile)
-    cli_player.shutdown()
+    mpl_player.save_game(args.outfile)
+    mpl_player.shutdown()
 
 
 if __name__ == "__main__":

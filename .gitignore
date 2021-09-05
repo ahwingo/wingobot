@@ -1,3 +1,5 @@
 legacy/*
 misc_models/*
+self_play_games/h5_games/*
+self_play_games/docker_test_games/*
 __pycache__/*

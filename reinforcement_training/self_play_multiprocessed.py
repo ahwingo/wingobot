@@ -7,22 +7,26 @@ Version Notes:
 This version of self play is the most efficient. It uses memoization and true multiprocessing.
 Inter-process communication is managed with queues, rather than with pipes.
 """
-
-import os
-import h5py
-import random
-import signal
+# Python Standard
 import argparse
-import numpy as np
-from time import time
-from gooop import Goban
-from threading import Event
 import multiprocessing as mp
-from training_library import TrainingLibrary
-from mcts_multiprocess import MonteCarloSearchTree
-from player_controller import PlayerController, GoBotTrainer
+import os
+import signal
+import sys
+from time import time
 
+# Third Party
+import h5py
+import numpy as np
 
+# Local
+sys.path.append("..")
+from source.gooop import Goban
+from source.training_library import TrainingLibrary
+from source.mcts_multiprocess import MonteCarloSearchTree
+from source.player_controller import PlayerController, GoBotTrainer
+
+# Globals
 KILLED = False
 WHITE = "White"
 BLACK = "Black"
@@ -54,6 +58,7 @@ class SelfPlayGame(mp.Process):
 
         # Store data on this class instance.
         self.game_id = game_id
+        self.game_num = queue_id
         self.queue_id = queue_id
         self.output_filename = "self_play_games/test_sgf/game_" + str(game_id) + ".sgf"
         self.black_processing_queues = black_processing_queues
@@ -81,13 +86,16 @@ class SelfPlayGame(mp.Process):
         # Make moves until the game duration has been reached. Store these moves.
         for move_number in range(0, self.game_duration, 2):
             # Make a move from the black player's perspective.
+            if self.game_num == 0:
+                print("Making move {}.".format(move_number))
             best_black_move = self.black_search_tree.search(self.num_black_simulations)
             self.moves.append(best_black_move)
             # Update the white tree to reflect the move. White may have already explored this state.
             if best_black_move in self.white_search_tree.root.children:
-                self.white_search_tree.update_root(self.white_search_tree.root.children[best_black_move])
+                self.white_search_tree.update_root(self.white_search_tree.root.children[best_black_move].copy())
             else:
-                curr_board_state = self.black_search_tree.root.get_board_state()
+                curr_board_state = self.black_search_tree.root.get_board_state().copy()
+                del self.white_search_tree
                 self.white_search_tree = MonteCarloSearchTree(self.queue_id,
                                                               self.white_processing_queues,
                                                               curr_board_state)
@@ -96,9 +104,10 @@ class SelfPlayGame(mp.Process):
             self.moves.append(best_white_move)
             # Update the black tree to reflect the move.
             if best_white_move in self.black_search_tree.root.children:
-                self.black_search_tree.update_root(self.black_search_tree.root.children[best_white_move])
+                self.black_search_tree.update_root(self.black_search_tree.root.children[best_white_move].copy())
             else:
-                curr_board_state = self.white_search_tree.root.get_board_state()
+                curr_board_state = self.white_search_tree.root.get_board_state().copy()
+                del self.black_search_tree
                 self.black_search_tree = MonteCarloSearchTree(self.queue_id,
                                                               self.black_processing_queues,
                                                               curr_board_state)
@@ -219,19 +228,30 @@ def main():
     """ Run self play on a bunch of threads using this main function. """
     # Parse the input arguments.
     parser = argparse.ArgumentParser()
-    parser.add_argument("--game_threads", default=128, type=int)
-    parser.add_argument("--game_duration", default=128, type=int)
-    parser.add_argument("--num_simulations_leader", default=32, type=int)
-    parser.add_argument("--num_simulations_follower", default=32, type=int)
-    parser.add_argument("--batches_per_training_cycle", default=4, type=int)
-    parser.add_argument("--training_cycles_per_save", default=1, type=int)
-    parser.add_argument("--komi", default=6.5, type=float)
-    parser.add_argument("--weights_dir", default="shodan_fossa")
-    parser.add_argument("--leading_bot_name", default="focal_fossa")
-    parser.add_argument("--go_bot_1", default="shodan_fossa/shodan_focal_fossa_135.h5")
-    parser.add_argument("--go_bot_2", default="shodan_fossa/shodan_focal_fossa_134.h5")
-    parser.add_argument("--game_output_dir", default="self_play_games/h5_games")
-
+    parser.add_argument("--game_threads", default=256, type=int,
+                        help="The number of independent games to run in parallel processes.")
+    parser.add_argument("--game_duration", default=128, type=int,
+                        help="The total number of moves (white and black) to be played each game.")
+    parser.add_argument("--num_simulations_leader", default=64, type=int,
+                        help="The number of MCTS rollouts for the leading bot to execute.")
+    parser.add_argument("--num_simulations_follower", default=8, type=int,
+                        help="The number of MCTS rollouts for the following bot to execute.")
+    parser.add_argument("--batches_per_training_cycle", default=4, type=int,
+                        help="The number of batches to train over, whenever training is executed.")
+    parser.add_argument("--training_cycles_per_save", default=1, type=int,
+                        help="Save a new weights file after this many training cycles have passed.")
+    parser.add_argument("--komi", default=6.5, type=float,
+                        help="The bonus points given to white, to account for playing second.")
+    parser.add_argument("--weights_dir", default="../misc_models/shodan_fossa",
+                        help="The directory to save trained weights file to.")
+    parser.add_argument("--leading_bot_name", default="focal_fossa",
+                        help="The name to associate the leading bot with.")
+    parser.add_argument("--go_bot_1", default="../models/shodan_focal_fossa_161.h5",
+                        help="The path to the starting weights file of the leading bot.")
+    parser.add_argument("--go_bot_2", default="../models/shodan_focal_fossa_161.h5",
+                        help="The path to the starting weights file of the following bot.")
+    parser.add_argument("--game_output_dir", default="../self_play_games/h5_games",
+                        help="The directory to save self play games, in h5 format, to.")
     args = parser.parse_args()
     num_game_threads = args.game_threads
     game_duration = args.game_duration
@@ -343,7 +363,7 @@ def main():
         # Notify that we have completed a batch.
         end_time = time()
         total_time = end_time - start_time
-        print("Completed batch {0} in {1} seconds.  TGP: {2}  NGT: {3}  SGP {4} TGL: {5}  LDR: {6}  LWL: {7}".format(
+        print("Completed batch {0} in {1} seconds.  TGP: {2}  NGT: {3}  SPM: {4}  TGL: {5}  LDR: {6}  LWL: {7}".format(
               batch_num, total_time, int((batch_num + 1) * num_game_threads), num_game_threads,
               num_leader_simulations, game_duration, leader, leader_win_likelihood))
         batch_num += 1

@@ -23,7 +23,6 @@ def main():
     """
     # Set the batch sizes to evaluate.
     batch_sizes = [2**p for p in range(13)]
-    num_trials = 4
 
     # Get the paths to the game data.
     data_dir = "../self_play_games/sgf"

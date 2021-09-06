@@ -210,7 +210,7 @@ WARNING: Click slowly and wait for the bot to respond, otherwise you may steal t
 
 ![MPL GUI](analysis/images/b52_bomber.png)
 
-Clearly this bot, which is playing white, has learned the [B2 Bomber](https://senseis.xmp.net/?ThePowerOfTheB2Bomber) - the strongest formation of all...
+Clearly this bot, which is playing white, has learned the [B2 Bomber](https://senseis.xmp.net/?ThePowerOfTheB2Bomber), the strongest formation of all...
 
 
 ## WinGoBot Analysis

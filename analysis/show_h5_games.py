@@ -35,7 +35,7 @@ ax.set_aspect('equal', 'box')
 
 # Use this to keep track of the moves list.
 moves_list = []
-move_num = 122
+move_num = 32
 
 
 def reset_plot():

@@ -1,22 +1,28 @@
 # WinGoBot: A Homegrown AlphaGo Zero Replica
 
-This repository holds code for training and playing against replicas of the AlphaGo Zero bot, using a 13x13 Go board.
-These _WinGoBots_, named after the author, are implemented as policy-value neural networks,
-which use Monte Carlo Tree Search to simulate gameplay prior to each move selection. The neural network architecture
+This repository holds code for training and playing against replicas of Deep Mind's AlphaGo Zero bot, using a 13x13 Go board.
+[Go](https://senseis.xmp.net/?Go) is the [world's oldest continuously played board game](https://senseis.xmp.net/?FunGoFacts),
+and it has served as one of this generation's great AI challenges, due to its complexity and the size of its state space.
+It is said that Go has more legal board configurations than there are atoms in the observable universe,
+which makes brute force search for optimal moves impossible. Instead, the best approach to date involves a reduced tree
+search, guided by the policy and value predictions of deep neural networks.
+
+
+The _WinGoBots_ in this repository, named after the author, are implemented as policy-value neural networks,
+which use Monte Carlo Tree Search (MCTS) to simulate gameplay prior to each move selection. The neural network architecture
 and MCTS parameters are modeled closely after those described in the original DeepMind papers
 on [AlphaGo](https://storage.googleapis.com/deepmind-media/alphago/AlphaGoNaturePaper.pdf) 
 and [AlphaGo Zero](https://www.nature.com/articles/nature24270.epdf), with a few key exceptions.
 The code is written to be highly scalable and designed to run on systems with multiple CPUs and GPUs.
-This `README` contains instructions for
-training WinGoBots, playing against them, and analyzing their game output.
+This `README` contains instructions for training WinGoBots, playing against them, and analyzing their game output.
 
 ### Example Game Output
 The following images show random samples of games played throughout the reinforcement learning process.
 These examples represent the first 1600 batches of self play.
 It may be noted that each of these examples are fairly similar to each other, especially in the opening stage.
 This similarity can be attributed to a lack of exploration during the reinforcement learning process.
-Potential solutions which would improve move diversity include increasing:
- * the number of MCTS simulations used during self play,
+Potential solutions which would improve move diversity include:
+ * increasing the number of MCTS simulations used during self play,
  * increasing the MCTS temperature parameter, which controls exploration.
  * increasing the number of game threads used for each batch of self play (more threads = more processing power required).
  * adding support for board reflection and rotation during self play, taking advantage of game symmetry. Work in progress.
@@ -67,7 +73,7 @@ git clone https://github.com/ahwingo/wingobot.git
 cd wingobot
 ```
 ### Step 2: Environment Configuration
-The policy-value neural networks use 2D convolutional layers that currently require TensorFlow to run with GPU support.
+The policy-value neural networks use 2D convolutional layers that currently require TensorFlow (TF) to run with GPU support.
 This consequently requires your system to have the appropriate graphics drivers and CUDA versions installed.
 
 #### The Easy Way (Docker)
@@ -121,8 +127,8 @@ python3 tnnlltf.py
 The code for reinforcement learning is located in the `reinforcement_training` directory.
 It performs the process of self play and is highly parallelized, so that hundreds of games can be played simultaneously.
 It requires a starting weights file, which can be created through the `PolicyValueNetwork` of the `source/nn_ll_tf.py`
-utility file, or through supervised / reinforcement learning. Note that while two weights files are requested,
-one for both players, these can be the same file. The self play process generates games and stores them as `.h5` files.
+utility file, or through supervised / reinforcement learning. Note that while two weights files are requested
+(one for both players) these can be the same file. The self play process generates games and stores them as `.h5` files.
 Self play can be run with the following command:
 
 ```
@@ -146,10 +152,10 @@ It supports the following command line arguments.
 --game_output_dir:             The directory to save self play games, in h5 format, to.
 ```
 
-NOTE: Self play is an extremely resource intensive process. Systems with many CPU cores and lots of memory are recommended, but not required.
+NOTE: Self play is an extremely resource-intensive process. Systems with many CPU cores and lots of memory are recommended, but not required.
 The image below shows the processing load caused by self play on the author's computer, running 256 simultaneous game 
 threads, each 128 moves long, with 64 MCTS simulations per leading-bot move.
-The peaks indicate the point at which moves are made and Monte Carlo search trees are reallocated.
+The peaks indicate the points at which moves are made and Monte Carlo search trees are reallocated.
 
 ![Self Play Processing Load](analysis/images/wingobot_training.png)
 
@@ -206,7 +212,7 @@ python3 play_vs_bot_matplotlib.py
 
 This results in a MatPlotLib GUI, which the user can click to place their stones.  
 NOTE: You must click the "move" icon before the stones will appear on the display. Stay in the mode throughout the game.  
-WARNING: Click slowly and wait for the bot to respond, otherwise you may steal the bots turn.
+WARNING: Click slowly and wait for the bot to respond, otherwise you may steal the bot's turn.
 
 ![MPL GUI](analysis/images/b52_bomber.png)
 
@@ -220,7 +226,7 @@ These can be found in the `analysis` directory.
 * `analysis/convert_h5_games_to_sgf.py` - Converts games stored in the custom H5 format to the standard [Smart Game Format](https://senseis.xmp.net/?SmartGameFormat).
 * `analysis/sgf_stats.py` - Given a set of SGF files, determines the total number of white / black wins and the average margin of victory.
 * `analysis/show_predictions.py` - DEPRECATED. Randomly loads games / input states, runs the WinGoBot on them, and prints a heat map of move probabilities.
-* `analysis/show_h5_games.py` - Load games stored in the custom H5 format and display them using MatPlotLib (shown in the introduction).
+* `analysis/show_h5_games.py` - Loads games stored in the custom H5 format and displays them using MatPlotLib (shown in the introduction).
 * `analysis/speed_test_game_state_loading.py` - Evaluates how fast game states can be loaded from SGF files (a smaller but slower format to load from than the custom H5 files).
 * `analysis/speed_test_nnlltf.py` - Evaluates how fast the WinGoBot's neural network can process batches of game state inputs. See the image below for an example.
 

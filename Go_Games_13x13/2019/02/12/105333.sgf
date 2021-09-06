@@ -1,9 +1,0 @@
-(;GM[1]FF[4]CA[UTF-8]
-RU[Chinese]SZ[13]KM[7.5]TM[600]
-PW[amybot-beginner-v1]PB[mcts_02]WR[1217]BR[2856]DT[2019-02-12]PC[(CGOS) 13x13 Computer Go Server]RE[B+Resign]GN[105333]
-;B[kj]BL[599];W[jd]WL[599];B[cj]BL[599];W[jk]WL[599];B[kk]BL[599];W[jl]WL[598];B[jj]BL[598];W[cd]WL[598]
-;B[hk]BL[598];W[ik]WL[597];B[hj]BL[594];W[hl]WL[597];B[gl]BL[590];W[kl]WL[597];B[ij]BL[586];W[im]WL[596]
-;B[ll]BL[581];W[lm]WL[596];B[km]BL[577];W[lk]WL[595];B[mm]BL[573];W[ml]WL[595];B[mk]BL[569];W[ch]WL[595]
-;B[hc]BL[565];W[ec]WL[594];B[kc]BL[559];W[kd]WL[594];B[jc]BL[555];W[id]WL[593];B[gb]BL[550];W[ic]WL[593]
-;B[ib]BL[547];W[jb]WL[593];B[kb]BL[542];W[ja]WL[592];B[hd]BL[537];W[fc]WL[592];B[ie]BL[533])
-

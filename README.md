@@ -210,7 +210,7 @@ python3 play_vs_bot_matplotlib.py
         --botfile ../models/shodan_focal_fossa_161.h5
 ```
 
-This results in a MatPlotLib GUI, which the user can click to place their stones.  
+This results in a Matplotlib GUI, which the user can click to place their stones.  
 NOTE: You must click the "move" icon before the stones will appear on the display. Stay in the mode throughout the game.  
 WARNING: Click slowly and wait for the bot to respond, otherwise you may steal the bot's turn.
 
@@ -226,7 +226,7 @@ These can be found in the `analysis` directory.
 * `analysis/convert_h5_games_to_sgf.py` - Converts games stored in the custom H5 format to the standard [Smart Game Format](https://senseis.xmp.net/?SmartGameFormat).
 * `analysis/sgf_stats.py` - Given a set of SGF files, determines the total number of white / black wins and the average margin of victory.
 * `analysis/show_predictions.py` - DEPRECATED. Randomly loads games / input states, runs the WinGoBot on them, and prints a heat map of move probabilities.
-* `analysis/show_h5_games.py` - Loads games stored in the custom H5 format and displays them using MatPlotLib (shown in the introduction).
+* `analysis/show_h5_games.py` - Loads games stored in the custom H5 format and displays them using Matplotlib (shown in the introduction).
 * `analysis/speed_test_game_state_loading.py` - Evaluates how fast game states can be loaded from SGF files (a smaller but slower format to load from than the custom H5 files).
 * `analysis/speed_test_nnlltf.py` - Evaluates how fast the WinGoBot's neural network can process batches of game state inputs. See the image below for an example.
 

@@ -50,10 +50,10 @@ class PolicyValueNetwork:
         if starting_network_file:
             if train_supervised:
                 self.model = load_model(starting_network_file, compile=False)
-                self.model.compile(optimizer=tf.keras.optimizers.SGD(lr=0.01, momentum=0.9),
+                self.model.compile(optimizer=tf.keras.optimizers.Adam(lr=0.001),
                                    loss={"value": tf.keras.losses.mean_squared_error,
                                          "policy": tf.keras.losses.categorical_crossentropy},
-                                   loss_weights=[0.01, 1.0],
+                                   loss_weights=[0.1, 1.0],
                                    metrics=[metrics.mse, metrics.categorical_accuracy])
             elif train_reinforcement:
                 self.model = load_model(starting_network_file, compile=False)
@@ -220,32 +220,41 @@ class PolicyValueNetwork:
         """
         # Load a copy of the model for training.
         training_model = load_model(save_file)
-        training_model.fit(x=training_data_input,
-                           y={"value": training_data_gt_value, "policy": training_data_gt_policy},
-                           batch_size=32,
-                           epochs=3,
-                           verbose=2)
+        history = training_model.fit(x=training_data_input,
+                                     y={"value": training_data_gt_value, "policy": training_data_gt_policy},
+                                     batch_size=32,
+                                     epochs=3,
+                                     verbose=2)
 
         # TODO: Watch out for race conditions!!! Obtain a lock to update self.model.
         # Save the newly trained version of this model to the young_saigon.h5 file.
         training_model.save(save_file)
         print("Done training!")
 
+    def train_supervised_gen(self, dataset, epochs=10000, batch_size=32, callbacks=[]):
+        history = self.model.fit(x=dataset,
+                                 epochs=epochs, verbose=2,
+                                 steps_per_epoch=32,
+                                 callbacks=callbacks)
+
+
     def train_supervised(self, training_data_input, training_data_gt_value, training_data_gt_policy,
-                         batch_size=32):
+                         batch_size=32, callbacks=[]):
         """
         This function creates a copy of the model, trains it, and then replaces the model when training is done.
         :param training_data_input:
         :param training_data_gt_value:
         :param training_data_gt_policy:
         :param batch_size:
-        :return:
+        :return: the training history object.
         """
         # Load a copy of the model for training.
-        self.model.fit(x=training_data_input,
-                       y={"value": training_data_gt_value, "policy": training_data_gt_policy},
-                       epochs=1, verbose=2,
-                       batch_size=batch_size)
+        history = self.model.fit(x=training_data_input,
+                                 y={"value": training_data_gt_value, "policy": training_data_gt_policy},
+                                 epochs=1, verbose=2,
+                                 batch_size=batch_size,
+                                 callbacks=callbacks)
+        return history
 
     def train_on_self_play_data(self, h5_files, batch_size, num_batches, weights_outfile=None):
         """

@@ -56,6 +56,9 @@ class SelfPlayGame(mp.Process):
         # Set the numpy random seed in the run function.
         self.random_seed = random_seed
 
+        # Let the first game print info.
+        self.can_print = queue_id == 0
+
         # Store data on this class instance.
         self.game_id = game_id
         self.game_num = queue_id
@@ -95,10 +98,12 @@ class SelfPlayGame(mp.Process):
                 self.white_search_tree.update_root(self.white_search_tree.root.children[best_black_move].copy())
             else:
                 curr_board_state = self.black_search_tree.root.get_board_state().copy()
+                old_search_count = self.white_search_tree.search_count
                 del self.white_search_tree
                 self.white_search_tree = MonteCarloSearchTree(self.queue_id,
                                                               self.white_processing_queues,
-                                                              curr_board_state)
+                                                              curr_board_state,
+                                                              search_count=old_search_count)
             # Make a move from the white player's perspective.
             best_white_move = self.white_search_tree.search(self.num_white_simulations)
             self.moves.append(best_white_move)
@@ -107,10 +112,12 @@ class SelfPlayGame(mp.Process):
                 self.black_search_tree.update_root(self.black_search_tree.root.children[best_white_move].copy())
             else:
                 curr_board_state = self.white_search_tree.root.get_board_state().copy()
+                old_search_count = self.black_search_tree.search_count
                 del self.black_search_tree
                 self.black_search_tree = MonteCarloSearchTree(self.queue_id,
                                                               self.black_processing_queues,
-                                                              curr_board_state)
+                                                              curr_board_state,
+                                                              search_count=old_search_count)
         # Now that the game is over, store the final board state. The main thread may want to print it.
         self.board_state = self.black_search_tree.root.get_board_state()  # This state will be from black's perspective.
         # Calculate the winner of the game.
@@ -228,29 +235,35 @@ def main():
     """ Run self play on a bunch of threads using this main function. """
     # Parse the input arguments.
     parser = argparse.ArgumentParser()
-    parser.add_argument("--game_threads", default=256, type=int,
+    parser.add_argument("--game_threads", default=1, type=int,   # If running just one sim per move, you can probably set this to 2048 or 4096. However, you need to fix a bug in the tree search. Go investigate that later.
                         help="The number of independent games to run in parallel processes.")
-    parser.add_argument("--game_duration", default=128, type=int,
+    parser.add_argument("--game_duration", default=168, type=int,
                         help="The total number of moves (white and black) to be played each game.")
-    parser.add_argument("--num_simulations_leader", default=64, type=int,
+
+    parser.add_argument("--num_simulations_leader", default=16, type=int,
                         help="The number of MCTS rollouts for the leading bot to execute.")
-    parser.add_argument("--num_simulations_follower", default=8, type=int,
+    parser.add_argument("--num_simulations_follower", default=2, type=int,
                         help="The number of MCTS rollouts for the following bot to execute.")
-    parser.add_argument("--batches_per_training_cycle", default=4, type=int,
+
+    parser.add_argument("--batches_per_training_cycle", default=100, type=int,
                         help="The number of batches to train over, whenever training is executed.")
-    parser.add_argument("--training_cycles_per_save", default=1, type=int,
+    parser.add_argument("--training_cycles_per_save", default=100, type=int,
                         help="Save a new weights file after this many training cycles have passed.")
-    parser.add_argument("--komi", default=6.5, type=float,
+
+    parser.add_argument("--komi", default=7.5, type=float,
                         help="The bonus points given to white, to account for playing second.")
-    parser.add_argument("--weights_dir", default="../misc_models/shodan_fossa",
+
+    parser.add_argument("--weights_dir", default="fresh_weights_06_09_22",
                         help="The directory to save trained weights file to.")
-    parser.add_argument("--leading_bot_name", default="focal_fossa",
+    parser.add_argument("--leading_bot_name", default="wingobot_rl",
                         help="The name to associate the leading bot with.")
-    parser.add_argument("--go_bot_1", default="../models/shodan_focal_fossa_161.h5",
+
+    parser.add_argument("--go_bot_1", default="../supervised_training/wingobot_sl_jun_7_2022_hlr/10_0.477.h5",
                         help="The path to the starting weights file of the leading bot.")
-    parser.add_argument("--go_bot_2", default="../models/shodan_focal_fossa_161.h5",
+    parser.add_argument("--go_bot_2", default="../supervised_training/wingobot_sl_jun_9_2022/1_0.010.h5",
                         help="The path to the starting weights file of the following bot.")
-    parser.add_argument("--game_output_dir", default="../self_play_games/h5_games",
+
+    parser.add_argument("--game_output_dir", default="test_mcts",
                         help="The directory to save self play games, in h5 format, to.")
     args = parser.parse_args()
     num_game_threads = args.game_threads
@@ -283,7 +296,7 @@ def main():
     bot_2_output_queues_map = {idx: output_q for idx, output_q in enumerate(bot_2_output_queues)}
 
     # Keep a registry of saved game files.
-    game_library = TrainingLibrary()
+    game_library = TrainingLibrary(data_dir=output_dir)
 
     # Create a trainer for the leading player.
     bot_trainer = GoBotTrainer(game_library, weights_dir)
@@ -388,6 +401,8 @@ def main():
             recently_saved_weights = False
             bot_2_processing_queue.locked.wait()
             bot_2_processing_queue.locked.clear()
+        """
+        """
 
     # Join the processing thread.  # TODO Write a proper shutdown handler.
     bot_1_processing_queue.shutdown()

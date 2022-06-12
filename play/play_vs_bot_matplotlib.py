@@ -7,6 +7,8 @@ import multiprocessing as mp
 import sys
 
 # Third Party
+import matplotlib
+matplotlib.use("TKagg")
 from matplotlib import pyplot as plt
 import matplotlib.patches as patches
 import numpy as np

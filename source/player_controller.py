@@ -18,12 +18,13 @@ class GoBotTrainer:
     def __init__(self, game_library, weights_directory,
                  train_batch_size=2048,
                  mini_batch_size=32,
-                 num_recent_games=1024):
+                 num_recent_games=4):
         """
         :param game_library: the TrainingLibrary instance that can be used to train this player on recent games.
         :param train_batch_size: the size of the total batch to train over during a training session.
         :param mini_batch_size: the size of the mini batch to train over. total batches = train_batch_size / mini_bs.
-        :param num_recent_games: the number of recent games to pull examples from during training.
+        :param num_recent_games: the number of recent game files to pull examples from during training.
+                                 note: a game file may contain hundres / thousands of games.
         """
         self.game_library = game_library
         self.train_batch_size = train_batch_size
@@ -63,7 +64,7 @@ class GoBotTrainer:
             - call the bot object's training function.
         :param bot: a PolicyValueNetwork object that should be trained.
         """
-        game_files = self.game_library.get_last_few_h5_files(self.num_recent_games // 128)
+        game_files = self.game_library.get_last_few_h5_files(self.num_recent_games)
         inputs, policies, values = self.game_library.get_random_training_batch(game_files, self.train_batch_size,
                                                                                bot.history_length, bot.board_size)
         bot.train_supervised(inputs, values, policies, self.mini_batch_size)

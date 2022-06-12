@@ -1,7 +1,18 @@
+"""
+Soruce for Monte-Carlo Tree Search.
+"""
+
+# Python Standard
 import sys
 import math
-import numpy as np
 import copy
+import random
+
+# Third Party
+import numpy as np
+
+# Local
+from .gooop import Goban
 
 # Set a few global variables.
 PUCT_CONST = 0.03
@@ -13,12 +24,12 @@ TEMP_SWITCH_THRESHOLD = 30
 class MCTSNode:
     """ Class representing a node of the monte carlo search tree. """
 
-    def __init__(self, board, parent=None, action_idx=None, adopted=False):
+    def __init__(self, board, parent=None, action_idx=None, adopted=False, can_print=False):
         """
         :param state: a 17x13x13 array representing board state (self.expand() will add two layers for liberty counts).
         """
         self.board = board
-
+        self.can_print = can_print
         # Indicate if the node was explored by the current tree using MCTS or adopted from the other player.
         self.adopted = adopted
 
@@ -35,6 +46,7 @@ class MCTSNode:
         self.total_action_value = None                # W(s, a)
         self.mean_action_value = None                 # Q(s, a)
         self.legal_actions = board.get_legal_moves()  # Binary matrix of which actions are legal.
+        self.bad_moves_filter = None
 
         # A list of all children (at next legal states) that have been turned into nodes.
         self.children = {}
@@ -47,7 +59,7 @@ class MCTSNode:
         ld_prevent[:, 12] -= np.ones(13)*0.05
         ld_prevent = np.reshape(ld_prevent, 169).tolist()
         ld_prevent.append(-0.5)
-        self.ld_prevent = ld_prevent
+        self.ld_prevent = np.asarray(ld_prevent) * 0.000
 
         # Once we have selected a maximum action index, store it here.
         self.best_action = None
@@ -98,6 +110,53 @@ class MCTSNode:
         total_size += sys.getsizeof(self.ld_prevent)
         return total_size
 
+    @staticmethod
+    def print_legend():
+        heatmap_colors = [0, 53, 54, 55, 56, 57, 32, 44, 43, 42, 41, 40, 118, 154, 192, 227, 226, 11, 220, 215, 214, 166, 160]
+        legend = ""
+        for color_code in heatmap_colors:
+            legend += "\033[48;5;" + str(color_code) + "m  \033[0m"
+        print(f"Legend: {legend}\n")
+
+    @staticmethod
+    def print_heatmap(move_probs):
+        output = []
+        heatmap_colors = [0, 53, 54, 55, 56, 57, 32, 44, 43, 42, 41, 40, 118, 154, 192, 227, 226, 11, 220, 215, 214, 166]
+        heatmap_bin_size = (max(0.001, move_probs.max())) / (len(heatmap_colors))
+        for row in range(13):
+            row_str = ""
+            for col in range(13):
+                move_idx = 13 * row + col
+                idx = min(len(heatmap_colors) - 1, int(round(move_probs[move_idx] / heatmap_bin_size)))
+                color_code = heatmap_colors[idx]
+                row_str += "\033[48;5;" + str(color_code) + "m  \033[0m "
+            output.append(row_str)
+        output.append("\n")
+        return output
+
+    @staticmethod
+    def print_board_local(current_board, bot_move_idx):
+        black = "16"
+        white = "15"
+        board = "222"
+        bot_move = "9"
+        output = []
+        for row in range(13):
+            row_str = ""
+            for col in range(13):
+                if row * 13 + col == bot_move_idx:
+                    val = bot_move
+                elif current_board[row, col] == 1:
+                    val = black
+                elif current_board[row, col] == -1:
+                    val = white
+                else:
+                    val = board
+                row_str += "\033[48;5;" + val + "m  \033[0m "
+            output.append(row_str)
+        output.append("\n")
+        return output
+
     def select_best_action(self, temperature):
         """
         The move that is finally selected is the move with the most visits, relative to the total number of visits made,
@@ -106,12 +165,30 @@ class MCTSNode:
         :param temperature: either 1, or close to 0. If 1, more exploration. If ~0, the most visited move always picked.
         :return:
         """
-        exponentiated_visits = [vis_cnt ** (1.0 / temperature) for vis_cnt in self.visit_count]
-        total_exponentiated_visits = sum(exponentiated_visits)
-        dirchlect_noise_coeff = 3  # Just the number 3...
-        dirichlet_probs = np.random.dirichlet([dirchlect_noise_coeff]*170)
-        probs = (dirichlet_probs + exponentiated_visits + self.ld_prevent) / total_exponentiated_visits
-        best_option = np.argmax(probs)
+        exponentiated_visits = self.visit_count ** (1.0 / temperature)
+        total_exponentiated_visits = exponentiated_visits.sum()
+        final_probs = exponentiated_visits / total_exponentiated_visits
+        best_option = random.choices(np.arange(len(final_probs)), weights=final_probs, k=1)[0]
+
+        #if self.can_print:
+        if True:
+
+            self.print_legend()
+            print_boards = []
+            print_boards.append(["Available Liberties                    ", *self.print_heatmap(np.reshape(self.board.available_liberties, (169,)))])
+            print_boards.append(["Legal Moves                            ", *self.print_heatmap(self.legal_actions)])
+            print_boards.append(["Prior Probabilities                    ", *self.print_heatmap(self.prior_probs)])
+            print_boards.append(["Bad Moves Filter                       ", *self.print_heatmap(self.bad_moves_filter)])
+            print_boards.append(["MCTS Visits                            ", *self.print_heatmap(self.visit_count)])
+            print_boards.append(["Final Options                          ", *self.print_heatmap(final_probs)])
+            print_boards.append(["Current Board                          ", *self.print_board_local(self.board.current_board, best_option)])
+            rows = ["" for _ in print_boards[0]]
+            for print_board in print_boards:
+                for idx, row in enumerate(print_board):
+                    rows[idx] = rows[idx] + "  " + row
+            for row in rows:
+                print(row)
+
         self.best_action = best_option
         return best_option
 
@@ -158,7 +235,8 @@ class MCTSNode:
         # First, get the liberty layers, given the current state.
         state_w_libs = self.board.get_state_w_libs()
 
-        # TODO Step 1: Apply a transformation to the states.
+        # Apply a transformation to the states. Store the tranformation details so that it can be reversed.
+        state_w_libs, num_rotations, flipped = Goban.randomly_transform_board(state_w_libs)
 
         # Predict a policy and value, by sending the state to the processing thread. Wait for a response.
         transmission = {"state": state_w_libs, "response_queue_id": game_id}
@@ -168,10 +246,15 @@ class MCTSNode:
         predicted_policy = reception["policy"]  # A 170 value array of weighted move options.
         predicted_value = reception["value"]  # A value indicating likelihood of winning.
 
-        # TODO Step 2: Apply the reverse transformation to the states.
+        # Apply the reverse transformation to the resulting policy prediction.
+        predicted_policy = Goban.reverse_policy_transformation(predicted_policy, num_rotations, flipped)
 
         # Filter out illegal moves.
-        best_legal_moves = self.legal_actions*predicted_policy
+        best_legal_moves = self.legal_actions * predicted_policy
+
+        # Filter out bad moves....
+        self.bad_moves_filter = self.board.get_bad_move_indices()
+        best_legal_moves = best_legal_moves * self.bad_moves_filter
 
         # Set the nodes main attributes, using correctly shaped np arrays.
         self.predicted_value = np.reshape(predicted_value, 1)           # V(s)
@@ -184,9 +267,13 @@ class MCTSNode:
 
     @staticmethod
     def apply_dirichlet_noise(prior_probs):
-        dirichlet_probs = np.random.dirichlet([3]*170)
-        new_prior_probs = [0.75*prior_probs[idx] + 0.25*dirichlet_probs[idx] for idx in range(170)]
-        return np.asarray(new_prior_probs)
+        """
+        # "Additional exploration is achieved by adding Dirichlet noise to the prior probabilities in the root node s0,
+        # specifically P(s, a) = (1 − ε)pa + εηa, where η ∼ Dir(0.03) and ε = 0.25"
+        """
+        dirichlet_probs = np.random.dirichlet([0.03]*170)
+        new_prior_probs = 0.75*prior_probs + 0.25*dirichlet_probs
+        return new_prior_probs
 
     def select_child_with_best_puct(self):
         """
@@ -206,6 +293,7 @@ class MCTSNode:
         puct_values += np.ones(len(puct_values)) * abs(puct_values.min())  # Offset by the minimum value.
         puct_values *= self.legal_actions
         max_action = np.argmax(puct_values)
+
         if not self.legal_actions[max_action] == 1:
             max_action = np.argmax(self.legal_actions)
             print("Selecting first legal action ({}), since all other actions were low in value...".format(max_action))
@@ -228,8 +316,6 @@ class MCTSNode:
             self.children[max_action] = child_node
 
         # Return the child node identified by the move with the best PUCT value.
-        mod13 = max_action % 13
-        div13 = max_action // 13
         self.traversal_count += 1
         return self.children[max_action]
 
@@ -294,7 +380,7 @@ class MonteCarloSearchTree:
     This class manages the tree search process.
     """
 
-    def __init__(self, tree_id, state_processing_queues, root_board, root=None):
+    def __init__(self, tree_id, state_processing_queues, root_board, root=None, can_print=False, search_count=0):
         """
         This class handles the tree search process.
         :param tree_id: the identify of this tree, as a unique integer.
@@ -306,10 +392,12 @@ class MonteCarloSearchTree:
         self.state_processing_queue = state_processing_queues["input"]
         self.results_queue = state_processing_queues["output"]
         self.root = root if root else MCTSNode(root_board)  # Create the root node, if it hasn't been provided.
+        self.root.can_print = can_print
         self.root.send_parent_to_nursing_home()  # Make sure the root does not have parents. Brutal...
         self.orig_root = self.root  # Keep a reference to the original root so that we can print the tree.
         self.temperature = INITIAL_TEMP
-        self.search_count = 0
+        self.search_count = search_count
+        self.can_print = can_print
 
     def __sizeof__(self):
         """
@@ -370,6 +458,7 @@ class MonteCarloSearchTree:
         :param new_root_node: the child of the current root node which represents the move selected during MCTS.
         """
         self.root = new_root_node
+        self.root.can_print = self.can_print
         self.root.send_parent_to_nursing_home()  # Since this is the new root, it shouldn't have parents.
 
     def update_on_opponent_selection(self, move_idx, board_after_move):
@@ -384,6 +473,21 @@ class MonteCarloSearchTree:
             self.root.children[move_idx] = new_node
             self.root = new_node
 
+    def simple_search(self):
+        """
+        Process the board state in the root node once. Select one of the top probability moves.
+        """
+        self.root.expand(self.state_processing_queue, self.results_queue, self.tree_id)  # Forms the prior probs.
+        best_legal_moves = self.root.legal_actions * self.root.prior_probs  # nparray of shape (170)
+        indices = [x for x in range(len(best_legal_moves))]
+        move_selection = random.choices(indices, weights=best_legal_moves, k=1)[0]
+        move_row = move_selection // 13
+        move_col = move_selection % 13
+        move_was_legal = self.root.board.make_move(move_row, move_col)  # TODO This may break if the max value is a pass...
+        if not move_was_legal and move_row != 13 and move_col != 13:
+            print("Illegal move made during child selection. Row {} Col {}".format(move_row, move_col))
+        return move_selection
+
     def search(self, num_simulations):
         """
         Select the best move by expanding the search tree.
@@ -391,6 +495,10 @@ class MonteCarloSearchTree:
         :param num_simulations: the total number of potential future moves to examine.
         :return: the index of the top move
         """
+        # If only one simulation is being run, this breaks MCTS. Perform a simple search instead.
+        if num_simulations == 1:
+            return self.simple_search()
+
         # If this tree has reached the temp switch threshold, update it.
         if self.search_count > TEMP_SWITCH_THRESHOLD:
             self.temperature = FINAL_TEMP

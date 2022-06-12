@@ -43,6 +43,8 @@ class String:
         """
         if [lib_row, lib_col] in self.liberties:
             self.liberties.remove([lib_row, lib_col])
+        else:
+            print(f"Trying to remove liberty from string {self.string_id} at row {lib_row} and col {lib_col} that is not a current liberty.")
 
     def add_liberty(self, lib_row, lib_col):
         """
@@ -82,7 +84,8 @@ class Goban:
         self.full_history = np.zeros((2*history_length, size, size), dtype=np.int8)
 
         # Store all states that will eventually be saved to / reloaded from an h5 file.
-        self.max_moves = size**2 + size  # TODO You may need to raise this threshold. It appears there is an odd bug causing an issue related to this.
+        #self.max_moves = size**2 + size  # TODO You may need to raise this threshold. It appears there is an odd bug causing an issue related to this.
+        self.max_moves = 4*size**2
         self.full_black_stones_history = np.zeros((self.max_moves, size, size), dtype=np.int8)
         self.full_black_liberty_history = np.zeros((self.max_moves, size, size), dtype=np.int8)
         self.full_white_stones_history = np.zeros((self.max_moves, size, size), dtype=np.int8)
@@ -192,6 +195,31 @@ class Goban:
         total_size += sys.getsizeof(self.legal_white_moves)
         total_size += sys.getsizeof(self.illegal_pos_by_ko)
         return total_size
+
+    def get_bad_move_indices(self):
+        """
+        This helper function looks at the legal moves on the current board and returns
+        a mask of moves that would not increase liberties for the player to move
+        or result in a capture.
+        :return : a (size, size) np array where decent moves have the value 1, and bad moves have the value 0.
+        """
+        # Find all the open locations with no libs.
+        legals = self.legal_black_moves if self.current_player == self.black else self.legal_white_moves
+        open_zeros = np.where(self.available_liberties == 0, 1, 0) * legals
+        open_zeros_indices = np.argwhere(open_zeros == 1)
+
+        # Of the open moves that would yield no obvious liberties,
+        # find the ones that would result in a good capture or pressure on the oponent.
+        for row, col in open_zeros_indices:
+            for (arow, acol), _ in self.get_adjacent_intersections(row, col):
+                if self.current_player == -self.current_board[arow, acol]:
+                    open_zeros[row, col] = 0
+                    break
+
+        # Create and return the mask.
+        bad_moves = np.reshape(np.ones(open_zeros.shape) - open_zeros, (self.size**2,)).tolist()
+        bad_moves.append(1)  # Passes are always okay.
+        return np.asarray(bad_moves)
 
     def get_state_w_libs_old(self):
         """ Return the state of the game in a nparray that can be processed by the wingobot NN. """
@@ -471,21 +499,28 @@ class Goban:
         results_in_black_liberties = False
         results_in_white_liberties = False
         for spot_idx, spot_value in adjacent_spots:
+            # If an adjacent spot is empty, then any move here should be legal.
             if spot_value == 0:
                 results_in_black_liberties = True
                 results_in_white_liberties = True
                 continue
+
+            # Otherwise, check other conditions based on the liberty count of the adjacent string.
             spot_row, spot_col = spot_idx
             string_id = self.string_board[spot_row, spot_col]
             lib_count = self.strings[string_id].liberty_count()
             if spot_value == self.black:
+                # Playing here as black would maintain a live string.
                 if lib_count > 1:
                     results_in_black_liberties = True
+                # Playing here as white would result in a black string being captured.
                 elif lib_count == 1:
                     results_in_white_liberties = True
             elif spot_value == self.white:
+                # Playing here as white would maintain a live string.
                 if lib_count > 1:
                     results_in_white_liberties = True
+                # Playing here as black would result in a white string being captured.
                 elif lib_count == 1:
                     results_in_black_liberties = True
         # If the move results in white or black liberties (either through capture or connection, its legal).
@@ -505,6 +540,7 @@ class Goban:
         :param col: the column index of the move to make illegal.
         """
         self.legal_black_moves[row, col] = 0
+        #print(f"setting [{row}, {col}] illegal for black...")
 
     def __set_illegal_for_white(self, row, col):
         """
@@ -513,6 +549,7 @@ class Goban:
         :param col: the column index of the move to make illegal.
         """
         self.legal_white_moves[row, col] = 0
+        #print(f"setting [{row}, {col}] illegal for white...")
 
     def __set_legal_for_black(self, row, col):
         """
@@ -521,6 +558,7 @@ class Goban:
         :param col: the column index of the move to make legal.
         """
         self.legal_black_moves[row, col] = 1
+        #print(f"setting [{row}, {col}] legal for black...")
 
     def __set_legal_for_white(self, row, col):
         """
@@ -529,6 +567,7 @@ class Goban:
         :param col: the column index of the move to make legal.
         """
         self.legal_white_moves[row, col] = 1
+        #print(f"setting [{row}, {col}] legal for white...")
 
     def __place_stone_at_index(self, row, col):
         """
@@ -545,6 +584,7 @@ class Goban:
         # Moving here will now be illegal for both players.
         self.__set_illegal_for_black(row, col)
         self.__set_illegal_for_white(row, col)
+
         # Update the liberty count and string board for this string.
         if self.current_player == self.black:
             self.black_string_count += 1
@@ -554,6 +594,7 @@ class Goban:
                 self.string_board[s_row, s_col] = new_string_id
                 self.black_liberties[s_row, s_col] = new_string.liberty_count()
             self.strings[new_string_id] = new_string
+            # If the new string only has one liberty, then playing there in a future step might be illegal.
             if new_string.liberty_count() == 1:
                 lib_row, lib_col = new_string.liberties[0]
                 self.__set_legality_dependent_on_liberties(lib_row, lib_col)
@@ -564,9 +605,11 @@ class Goban:
                 self.string_board[s_row, s_col] = new_string_id
                 self.white_liberties[s_row, s_col] = new_string.liberty_count()
             self.strings[new_string_id] = new_string
+            # If the new string only has one liberty, then playing there in a future step might be illegal.
             if new_string.liberty_count() == 1:
                 lib_row, lib_col = new_string.liberties[0]
                 self.__set_legality_dependent_on_liberties(lib_row, lib_col)
+
         # Identify the adjacent enemy strings, to update their liberty counts (decrement by one).
         opponent_value = self.white if self.current_player == self.black else self.black
         opponent_string_ids = []
@@ -576,37 +619,50 @@ class Goban:
                 string_id = self.string_board[adj_row, adj_col]
                 if string_id != "EMPTY" and string_id not in opponent_string_ids:
                     opponent_string_ids.append(string_id)
+
+        # Find the opponents that should have a liberty removed (and potentially be captured).
         captured_opponents = []
         for opp_string_id in opponent_string_ids:
             opp_string = self.strings[opp_string_id]
-            opp_string.remove_liberty(row, col)
+            opp_string.remove_liberty(row, col)  # Remove the liberty!
             new_opp_lib_count = opp_string.liberty_count()
             for s_row, s_col in opp_string.indices:
                 if opponent_value == self.black:
                     self.black_liberties[s_row, s_col] = new_opp_lib_count
                 elif opponent_value == self.white:
                     self.white_liberties[s_row, s_col] = new_opp_lib_count
+
+            # Opponents with no remaining liberty will be captured.
             if new_opp_lib_count == 0:
                 captured_opponents.append(opp_string_id)
+
+            # Opponents with only one remaining liberty may be at risk of capture.
             elif new_opp_lib_count == 1:
                 lib_row, lib_col = opp_string.liberties[0]
                 self.__set_legality_dependent_on_liberties(lib_row, lib_col)
+
+        # Decrement the available liberties on the liberty board adjacent to the move.
         self.__decrement_liberties_adjacent_to(row, col)
+
+        # Return prisoners.
         return captured_opponents
 
     def __remove_stone_at_index(self, row, col):
         """
         This function removes a stone from current board at the given index.
         It will increment the liberty count of adjacent enemy strings.
+        In doing so, those enemy strings should be used to recalculate other legal moves that may be opened up.
         :param row:
         :param col:
         :return:
         """
+        #print(f"Removing stone at [{row}, {col}].")
         # Get the value of the stone at this index, to update its adjacent opponents liberty counts (increment by one).
         stone_value = self.current_board[row, col]
         # Clear that position.
         self.current_board[row, col] = 0
         self.string_board[row, col] = "EMPTY"
+
         # Get the opponent strings.
         opponent_value = self.white if stone_value == self.black else self.black
         opponent_string_ids = []
@@ -616,15 +672,30 @@ class Goban:
                 string_id = self.string_board[adj_row, adj_col]
                 if string_id not in opponent_string_ids:
                     opponent_string_ids.append(string_id)
+
+        # Increment the liberty count of those strings.
+        # NOTE: If this string only had ONE liberty then a self-capture type move
+        #       COULD have been legal for the player of the stone being removed.
+        #       It is therefore necessary to recalculate the legality in nearby open positions
+        #       where the available liberty count is ZERO (i.e. the self-capture but would have been legal positions).
         for opp_string_id in opponent_string_ids:
             opp_string = self.strings[opp_string_id]
+            orig_lib_count = opp_string.liberty_count()
             opp_string.add_liberty(row, col)
             new_lib_count = opp_string.liberty_count()
             for s_row, s_col in opp_string.indices:
+                # Increment the black or white liberties.
                 if opponent_value == self.black:
                     self.black_liberties[s_row, s_col] = new_lib_count
                 elif opponent_value == self.white:
                     self.white_liberties[s_row, s_col] = new_lib_count
+            # Check if any previously legal moves are no longer legal (only if this originally had ONE liberty).
+            if orig_lib_count == 1:
+                lib_row, lib_col = opp_string.liberties[0]
+                if self.available_liberties[lib_row, lib_col] == 0:
+                    #print(f"Removing {'black' if stone_value == self.black else 'white'} stone at [{row}, {col}]. ----> Recalculating legalities on [{lib_row}, {lib_col}].")
+                    self.__set_legality_dependent_on_liberties(lib_row, lib_col)
+
         # Increment the available liberties for a stone played at this spot by one.
         self.__increment_liberties_adjacent_to(row, col)
 
@@ -640,13 +711,16 @@ class Goban:
             self.__remove_stone_at_index(s_row, s_col)
             stones_removed.append([s_row, s_col])
         del self.strings[string_id]
+
         # Set the legality of moving at the freed indices to legal if more than one stone is freed...
         if len(stones_removed) > 1:
             for s_row, s_col in stones_removed:
                 self.__set_legal_for_black(s_row, s_col)
                 self.__set_legal_for_white(s_row, s_col)
+
         # Otherwise, if the number of stones removed is only equal to one, the legality is dependent on liberty counts.
         elif len(stones_removed) == 1:
+            #print("Setting legality...")
             self.__set_legality_dependent_on_liberties(stones_removed[0][0], stones_removed[0][1])
         return stones_removed
 
@@ -667,6 +741,7 @@ class Goban:
         :param row: the row index of the move.
         :param col: the col index of the move.
         """
+        #print("Setting KO")
         self.illegal_pos_by_ko = [row, col]
         if self.current_player == self.black:
             self.__set_illegal_for_white(row, col)
@@ -713,10 +788,12 @@ class Goban:
         for captured_string_id in captured_opponents:
             removed_stones.extend(self.__remove_string(captured_string_id))
 
-        # If there was only one stone removed, then this move will be illegal the next turn based on the Ko rule.
+        # If there was only one stone removed, then this move will be illegal the next turn based on the Ko rule, unless
+        # this position is completely surrounded.
         if len(removed_stones) == 1:
             ko_row, ko_col = removed_stones[0]
-            self.__set_ko(ko_row, ko_col)
+            if self.available_liberties[ko_row, ko_col] > 0:
+                self.__set_ko(ko_row, ko_col)
 
         # Update the stored histories, including the list of moves, black and white board states, and liberties.
         self.__update_total_histories(row, col)
@@ -825,6 +902,45 @@ class Goban:
             for line in lines:
                 f.write(line)
 
+    @staticmethod
+    def print_heatmap(move_probs):
+        output = []
+        heatmap_colors = [0, 53, 54, 55, 56, 57, 32, 44, 43, 42, 41, 40, 118, 154, 192, 227, 226, 11, 220, 215, 214, 166]
+        heatmap_bin_size = (max(0.001, move_probs.max())) / (len(heatmap_colors))
+        for col in range(13):
+            row_str = ""
+            for row in range(13):
+                move_idx = 13 * row + col
+                idx = min(len(heatmap_colors) - 1, int(round(move_probs[move_idx] / heatmap_bin_size)))
+                color_code = heatmap_colors[idx]
+                row_str += "\033[48;5;" + str(color_code) + f"m{str(int(move_probs[move_idx])).zfill(2)}\033[0m "
+            output.append(row_str)
+        output.append("\n")
+        return output
+
+    @staticmethod
+    def print_board_local(current_board, bot_move_idx):
+        black = "16"
+        white = "15"
+        board = "222"
+        bot_move = "9"
+        output = []
+        for col in range(13):
+            row_str = ""
+            for row in range(13):
+                if row * 13 + col == bot_move_idx:
+                    val = bot_move
+                elif current_board[row, col] == 1:
+                    val = black
+                elif current_board[row, col] == -1:
+                    val = white
+                else:
+                    val = board
+                row_str += "\033[48;5;" + val + "m  \033[0m "
+            output.append(row_str)
+        output.append("\n")
+        return output
+
     def load_game_from_sgf(self, sgf_file):
         """
         Initialize a game state by reading moves from an SGF file.
@@ -832,30 +948,49 @@ class Goban:
         :return:
         """
         reverse_move_code_map = {0: "a", 1: "b", 2: "c", 3: "d", 4: "e", 5: "f", 6: "g",
-                                 7: "h", 8: "i", 9: "j", 10: "k", 11: "l", 12: "m"}
+                                 7: "h", 8: "i", 9: "j", 10: "k", 11: "l", 12: "m", 13: "p"}
         move_code_map = {value: key for key, value in reverse_move_code_map.items()}
         with open(sgf_file, "r") as sgf_f:
-            content = sgf_f.readlines()[0].split(";")
+            content = ""
+            for line in sgf_f.readlines():
+                content += line.strip()
+            content = content.split(";")
         move_list = []
         for item in content:
-            if item.startswith("B[") and item != "B[]":
+            if item.startswith("B[") and item[:3] != "B[]":
                 row = move_code_map[item[2]]
                 col = move_code_map[item[3]]
                 move_list.append((row, col))
-            elif item == "B[]":
+            elif item.startswith("B[]"):
                 row = 13
                 col = 13
                 move_list.append((row, col))
-            elif item.startswith("W[") and item != "W[]":
+            elif item.startswith("W[") and item[:3] != "W[]":
                 row = move_code_map[item[2]]
                 col = move_code_map[item[3]]
                 move_list.append((row, col))
-            elif item == "W[]":
+            elif item.startswith("W[]"):
                 row = 13
                 col = 13
                 move_list.append((row, col))
-        for row, col in move_list:
-            self.make_move(row, col)
+        for idx, (row, col) in enumerate(move_list):
+            """
+            print(f"Move {idx + 1}: {'Black' if self.current_player == self.black else 'White'} to [{reverse_move_code_map[row]}, {reverse_move_code_map[col]}]  or  [{row}, {col}].")
+            string_lib_board = np.zeros((13,13))
+            for r in range(13):
+                for c in range(13):
+                    s = self.string_board[r, c]
+                    if s == "EMPTY":
+                        string_lib_board[r, c] = 0
+                    else:
+                        string_lib_board[r, c] = self.strings[s].liberty_count()
+            [print(x, "    ", y) for x, y in zip(self.print_board_local(self.current_board, row*13 + col), self.print_heatmap(np.reshape(string_lib_board, (169,))))]
+            """
+            result = self.make_move(row, col)
+            if not result and row != 13 and col != 13:
+                print(f"{sgf_file}: Made an illegal move, resulting in a forced pass.")
+                #exit()
+            #print("\n\n")
 
     def load_game_from_moves_list(self, moves_list):
         """
@@ -898,6 +1033,61 @@ class Goban:
             print(current_line)
         print("\n")
 
+    @staticmethod
+    def randomly_transform_board(board):
+        """
+        Randomly rotate and flip a board.
+        :param board: a Nx13x13 numpy array
+        """
+        board = board.copy()
+        num_rotations = random.choice([0, 1, 2, 3])
+        flip = random.choice([True, False])
+        new_board = np.rot90(board, num_rotations, axes=(1, 2))
+        if flip:
+            new_board = np.flip(new_board, axis=2)
+        return new_board, num_rotations, flip
+
+    @staticmethod
+    def reverse_policy_transformation(policy, num_rotations, flipped):
+        policy = np.asarray(policy).copy()
+        # There is nothing special to do if the move selected was a pass.
+        if policy[-1] == 1:
+            restored_policy = policy
+        # Otherwise, convert to a board and apply the reverse flips and rotations.
+        else:
+            restored_policy = np.asarray(policy[:-1]).reshape((13, 13))
+            restored_policy = np.rot90(restored_policy, -num_rotations)
+            if flipped:
+                restored_policy = np.flip(restored_policy, axis=1)
+            restored_policy = np.reshape(restored_policy, 169).tolist()
+            restored_policy.append(0)
+        return np.asarray(restored_policy)
+
+    @staticmethod
+    def reverse_transformation(board, num_rotations, flipped, policy=None):
+        """
+        Reverse the transformtion applied by Goban.randomly_transform_board().
+        """
+        board = board.copy()
+        restored_board = np.rot90(board, -num_rotations, axes=(1, 2))  # Rotate in the other direction along same axis.
+        restored_policy = None
+        if flipped:
+            restored_board = np.flip(restored_board, axis=2)
+        if policy is not None:
+            policy = np.asarray(policy).copy()
+            # There is nothing special to do if the move selected was a pass.
+            if policy[-1] == 1:
+                restored_policy = policy
+            # Otherwise, convert to a board and apply the reverse flips and rotations.
+            else:
+                restored_policy = np.asarray(policy[:-1]).reshape((13, 13))
+                restored_policy = np.rot90(restored_policy, -num_rotations)
+                if flipped:
+                    restored_policy = np.flip(restored_policy, axis=1)
+                restored_policy = np.reshape(restored_policy, 169).tolist()
+                restored_policy.append(0)
+        return np.asarray(restored_board), np.asarray(restored_policy)
+
 
 def print_board(black_board, white_board):
     # TODO Definitely keep this as a class method, but just use the single board. It will be simpler that way.
@@ -910,14 +1100,14 @@ def print_board(black_board, white_board):
     current_line = ""
     for idx in range(169):
         if black_board[idx] == 1:
-            #current_line += " \U000026AB "
-            current_line += "\U0001F535"
+            current_line += " \U000026AB "
+            #current_line += "\U0001F535"
         elif white_board[idx] == 1:
-            #current_line += "\U000026AA "
-            current_line += "\U0001F534"
+            current_line += " \U000026AA "
+            #current_line += "\U0001F534"
         else:
-            #current_line += " \U00002795 "
-            current_line += "+"
+            current_line += " \U00002795 "
+            #current_line += "+"
 
         if (idx+1) % 13 == 0:
             print(current_line)

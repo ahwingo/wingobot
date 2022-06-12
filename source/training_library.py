@@ -1,8 +1,10 @@
 """
 This module is used to keep track of self play game files.
 """
+import os
 import h5py
 import random
+from multiprocessing import Pool
 import numpy as np
 
 
@@ -13,8 +15,12 @@ class TrainingLibrary:
         - a list of files to pull training data from
         - a minibatch of training data
     """
-    def __init__(self):
+    def __init__(self, data_dir=None):
+        # Create a list that will reference all available training file paths.
         self.registered_h5_files = []
+        # If the constructor is passed a data directory, pre-load the files from this directory.
+        if data_dir is not None:
+            self.registered_h5_files = [os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith("h5")]
 
     def register_h5_file(self, h5_file):
         """
@@ -68,11 +74,14 @@ class TrainingLibrary:
         inputs = []
         gt_values = []
         gt_policies = []
-        for _ in range(batch_size):
+        count = 0
+        while count < batch_size:
             random_game_file = random.choice(open_game_files)
             random_game_num = random.choice(list(random_game_file["games"].keys()))
             random_game = random_game_file["games"][random_game_num]
             num_moves = random_game["num_moves"][()]
+            if num_moves == 0:
+                continue
             random_move = random.randint(0, num_moves - 1)
 
             # Build the input.
@@ -122,8 +131,102 @@ class TrainingLibrary:
             gt_policies.append(policy)
             gt_values.append(value)
 
+            # Increment the counter.
+            count += 1
+
         # Close any files that you opened.
         [f.close() for f in open_game_files]
+        # Return the inputs, policies, and values.
+        inputs = np.asarray(inputs)
+        gt_values = np.reshape(np.asarray(gt_values), (batch_size, 1))
+        gt_policies = np.asarray(gt_policies)
+        return inputs, gt_policies, gt_values
+
+    @staticmethod
+    def _mp_get_training_example(data):
+        random_game_file, history_size, board_size = data
+        random_game_file = h5py.File(random_game_file, "r")
+        while True:
+            random_game_num = random.choice(list(random_game_file["games"].keys()))
+            random_game = random_game_file["games"][random_game_num]
+            num_moves = random_game["num_moves"][()]
+            if num_moves == 0:
+                continue
+            random_move = random.randint(0, num_moves - 1)
+
+            # Build the input.
+            input_layers = []
+            num_pads = 2 * TrainingLibrary.get_num_pads(random_move, history_size)  # 2X b/c of black & white layers.
+            for _ in range(num_pads):
+                input_layers.append(np.zeros((board_size, board_size), dtype=np.int8))
+            for idx in TrainingLibrary.get_actual_states_range(random_move, history_size):
+                if random_move % 2 == 0:  # its black to move
+                    input_layers.append(random_game["black_states"][()][idx])
+                    input_layers.append(random_game["white_states"][()][idx])
+                else:  # its white to move
+                    input_layers.append(random_game["white_states"][()][idx])
+                    input_layers.append(random_game["black_states"][()][idx])
+            if random_move % 2 == 0:
+                input_layers.append(np.ones((board_size, board_size), dtype=np.int8))  # player identity layer: B=1 W=0
+                if random_move == 0:
+                    input_layers.append(np.zeros((board_size, board_size), dtype=np.int8))
+                    input_layers.append(np.zeros((board_size, board_size), dtype=np.int8))
+                else:
+                    input_layers.append(random_game["black_liberties"][()][random_move - 1])
+                    input_layers.append(random_game["white_liberties"][()][random_move - 1])
+            else:
+                input_layers.append(np.zeros((board_size, board_size), dtype=np.int8))  # player identity layer: B=1 W=0
+                if random_move == 0:
+                    input_layers.append(np.zeros((board_size, board_size), dtype=np.int8))
+                    input_layers.append(np.zeros((board_size, board_size), dtype=np.int8))
+                else:
+                    input_layers.append(random_game["white_liberties"][()][random_move - 1])
+                    input_layers.append(random_game["black_liberties"][()][random_move - 1])
+
+            # Extract the policy.
+            policy = np.zeros(1 + board_size ** 2, dtype=np.int8)
+            row, col = random_game["moves"][()][random_move]
+            move_idx = min(row * board_size + col, 169)  # 169 indicates a pass (row = col = 13  --->  182)
+            policy[move_idx] = 1
+
+            # Extract the value.
+            outcome = random_game["outcome"][()]
+            if random_move % 2 == 0:
+                value = 1 if outcome[0] == "B" else -1
+            else:
+                value = 1 if outcome[0] == "W" else -1
+
+            # Add the input, policy, and value to the list.
+            random_game_file.close()
+            return (input_layers, policy, value)
+
+    @staticmethod
+    def get_random_training_batch_mp(h5_files, batch_size, history_size, board_size):
+        """
+        Return a randomly selected batch of board states and the ground truth policy and values.
+        :param h5_files: a list of h5 files to train over.
+        :param batch_size:
+        :param history_size:
+        :param board_size:
+        :return:
+        """
+        #open_game_files = [h5py.File(h5f, "r") for h5f in h5_files]
+        inputs = []
+        gt_values = []
+        gt_policies = []
+
+        # Get the data for each batch item.
+        with Pool(64) as p:
+            data = [(random.choice(h5_files), history_size, board_size) for _ in range(batch_size)]
+            batch_data = p.map(TrainingLibrary._mp_get_training_example, data)
+
+        for input_layer, policy, value in batch_data:
+            inputs.append(input_layer)
+            gt_policies.append(policy)
+            gt_values.append(value)
+
+        # Close any files that you opened.
+        #[f.close() for f in open_game_files]
         # Return the inputs, policies, and values.
         inputs = np.asarray(inputs)
         gt_values = np.reshape(np.asarray(gt_values), (batch_size, 1))
